@@ -118,14 +118,12 @@ function createProductGeometry(params: ProductParams): THREE.BufferGeometry {
     shape.lineTo(0, t - bevel);
     shape.lineTo(0, bevel);
     shape.closePath();
-    const geo = new THREE.ExtrudeGeometry(shape, {
+    // Shape already spans width along X and thickness along Y (extrude depth = length along Z),
+    // so the panel lies flat with thickness vertical — no rotation needed.
+    return new THREE.ExtrudeGeometry(shape, {
       depth: l,
       bevelEnabled: false,
     });
-    // Rotate so panel lies flat (XZ plane), height (thickness) along Y
-    geo.rotateX(-Math.PI / 2);
-    geo.rotateY(Math.PI / 2);
-    return geo;
   }
 
   let shape: THREE.Shape;
@@ -490,21 +488,44 @@ export default function ThreeViewer({ params }: Props) {
     scene.add(mesh);
     meshRef.current = mesh;
 
-    // Fit camera to model
+    // Fit camera to model — these products are long and thin (length >> height/thickness),
+    // so a fixed-ratio camera offset puts most of the distance budget along the long axis
+    // and the piece renders as a tiny foreshortened sliver. Instead, project the bounding
+    // box corners onto a fixed viewing direction and solve the distance that snugly fits
+    // both screen axes, accounting for the real aspect ratio.
     const box = new THREE.Box3().setFromObject(mesh);
     const center = box.getCenter(new THREE.Vector3());
-    const size = box.getSize(new THREE.Vector3());
-    const maxDim = Math.max(size.x, size.y, size.z);
-
     mesh.position.sub(center); // center the mesh at origin
+    const halfSize = box.getSize(new THREE.Vector3()).multiplyScalar(0.5);
 
-    controlsRef.current!.target.set(0, 0, 0);
-    const fov = camera.fov * (Math.PI / 180);
-    const dist = Math.abs(maxDim / Math.sin(fov / 2)) * 0.7;
-    camera.position.set(dist * 0.6, dist * 0.35, dist * 0.7);
-    camera.near = dist * 0.001;
+    const dir = new THREE.Vector3(1, 0.5, 0.35).normalize(); // mostly side-on, slight reveal of the end profile
+    const up = new THREE.Vector3(0, 1, 0);
+    const forward = dir.clone().negate();
+    const right = new THREE.Vector3().crossVectors(up, forward).normalize();
+    const camUp = new THREE.Vector3().crossVectors(forward, right).normalize();
+
+    let maxRight = 0;
+    let maxUp = 0;
+    for (const sx of [-1, 1]) {
+      for (const sy of [-1, 1]) {
+        for (const sz of [-1, 1]) {
+          const corner = new THREE.Vector3(sx * halfSize.x, sy * halfSize.y, sz * halfSize.z);
+          maxRight = Math.max(maxRight, Math.abs(corner.dot(right)));
+          maxUp = Math.max(maxUp, Math.abs(corner.dot(camUp)));
+        }
+      }
+    }
+
+    const vFov = camera.fov * (Math.PI / 180);
+    const hFov = 2 * Math.atan(Math.tan(vFov / 2) * camera.aspect);
+    const dist = Math.max(maxUp / Math.tan(vFov / 2), maxRight / Math.tan(hFov / 2)) * 1.25;
+
+    camera.position.copy(dir).multiplyScalar(dist);
+    camera.near = Math.max(dist * 0.001, 0.0001);
     camera.far = dist * 10;
     camera.updateProjectionMatrix();
+
+    controlsRef.current!.target.set(0, 0, 0);
     controlsRef.current!.update();
   }, [params]);
 
