@@ -3,6 +3,7 @@
 import { useEffect, useRef, useCallback } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { SVGLoader } from 'three/examples/jsm/loaders/SVGLoader.js';
 import type { ProductParams, ProfileStyle } from '@/lib/types';
 
 interface Props {
@@ -98,14 +99,67 @@ function buildCornisaShape(h: number, t: number, style: ProfileStyle): THREE.Sha
   return shape;
 }
 
+// Traces an uploaded sketch's largest closed region (CDR/PDF/JPG, already converted to SVG
+// server-side) into a Shape, rescaled to span [0, spanX] x [0, spanY] in the same local-axis
+// convention as the preset profile builders above (X = thickness/width, Y = height, base at Y=0).
+function buildShapeFromSVG(svgText: string, spanX: number, spanY: number): THREE.Shape | null {
+  let paths: THREE.ShapePath[];
+  try {
+    paths = new SVGLoader().parse(svgText).paths;
+  } catch {
+    return null;
+  }
+
+  let best: THREE.Shape | null = null;
+  let bestArea = 0;
+  for (const shapePath of paths) {
+    for (const candidate of SVGLoader.createShapes(shapePath)) {
+      const area = Math.abs(THREE.ShapeUtils.area(candidate.getPoints(64)));
+      if (area > bestArea) {
+        bestArea = area;
+        best = candidate;
+      }
+    }
+  }
+  if (!best) return null;
+
+  const pts = best.getPoints(128);
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const p of pts) {
+    minX = Math.min(minX, p.x);
+    maxX = Math.max(maxX, p.x);
+    minY = Math.min(minY, p.y);
+    maxY = Math.max(maxY, p.y);
+  }
+  const sx = spanX / (maxX - minX || 1);
+  const sy = spanY / (maxY - minY || 1);
+
+  // SVG's Y axis points down; flip it so the traced profile stands upright (base at Y=0).
+  const remapped = new THREE.Shape();
+  pts.forEach((p, i) => {
+    const x = (p.x - minX) * sx;
+    const y = spanY - (p.y - minY) * sy;
+    if (i === 0) remapped.moveTo(x, y);
+    else remapped.lineTo(x, y);
+  });
+  remapped.closePath();
+
+  return remapped;
+}
+
 function createProductGeometry(params: ProductParams): THREE.BufferGeometry {
-  const { productType, height, thickness, width, length, profileStyle } = params;
+  const { productType, height, thickness, width, length, profileStyle, customProfileSvg } = params;
   const h = height / 1000;
   const t = thickness / 1000;
   const l = length / 1000;
 
   if (productType === 'pardoseala_spc') {
     const w = (width ?? 180) / 1000;
+    const traced = customProfileSvg ? buildShapeFromSVG(customProfileSvg, w, t) : null;
+    if (traced) {
+      return new THREE.ExtrudeGeometry(traced, { depth: l, bevelEnabled: false });
+    }
+
     // SPC panel - bevel the top edges slightly for realism
     const shape = new THREE.Shape();
     const bevel = t * 0.08;
@@ -126,11 +180,9 @@ function createProductGeometry(params: ProductParams): THREE.BufferGeometry {
     });
   }
 
-  let shape: THREE.Shape;
-  if (productType === 'cornisa') {
-    shape = buildCornisaShape(h, t, profileStyle);
-  } else {
-    shape = buildPlintaShape(h, t, profileStyle);
+  let shape: THREE.Shape | null = customProfileSvg ? buildShapeFromSVG(customProfileSvg, t, h) : null;
+  if (!shape) {
+    shape = productType === 'cornisa' ? buildCornisaShape(h, t, profileStyle) : buildPlintaShape(h, t, profileStyle);
   }
 
   const geo = new THREE.ExtrudeGeometry(shape, {
@@ -594,7 +646,7 @@ export default function ThreeViewer({ params }: Props) {
             <span className="text-slate-400">Lungime:</span>
             <span>{params.length} mm</span>
             <span className="text-slate-400">Profil:</span>
-            <span>{params.profileStyle}</span>
+            <span>{params.customProfileSvg ? 'din schiță încărcată' : params.profileStyle}</span>
             <span className="text-slate-400">Finisaj:</span>
             <span>{params.finish}</span>
             <span className="text-slate-400">Culoare:</span>

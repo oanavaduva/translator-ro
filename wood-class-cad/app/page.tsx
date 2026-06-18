@@ -21,11 +21,18 @@ const EXAMPLES = [
   'Cornișă clasică 12cm x 10cm, nuc, 2.5m',
 ];
 
+const SKETCH_ACCEPT = '.jpg,.jpeg,.png,.pdf,.cdr';
+
 export default function Home() {
   const [description, setDescription] = useState('');
   const [params, setParams] = useState<ProductParams | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+
+  const [sketchName, setSketchName] = useState('');
+  const [sketchSvg, setSketchSvg] = useState<string | null>(null);
+  const [sketchLoading, setSketchLoading] = useState(false);
+  const [sketchError, setSketchError] = useState('');
 
   const handleExtract = useCallback(async (text?: string) => {
     const input = text ?? description;
@@ -61,6 +68,39 @@ export default function Home() {
     setDescription(ex);
     handleExtract(ex);
   };
+
+  const handleSketchUpload = useCallback(async (file: File) => {
+    setSketchLoading(true);
+    setSketchError('');
+    setSketchName(file.name);
+    try {
+      const body = new FormData();
+      body.append('file', file);
+      const res = await fetch('/api/convert-sketch', { method: 'POST', body });
+      const data = await res.json();
+      if (data.success) {
+        setSketchSvg(data.svg);
+      } else {
+        setSketchSvg(null);
+        setSketchError(data.error ?? 'Nu s-a putut converti schița');
+      }
+    } catch {
+      setSketchSvg(null);
+      setSketchError('Eroare de conexiune la server');
+    } finally {
+      setSketchLoading(false);
+    }
+  }, []);
+
+  const clearSketch = () => {
+    setSketchName('');
+    setSketchSvg(null);
+    setSketchError('');
+  };
+
+  const viewerParams: ProductParams | null = params
+    ? { ...params, customProfileSvg: sketchSvg ?? undefined }
+    : null;
 
   return (
     <div className="min-h-screen bg-[#0f0f1a] text-white flex flex-col">
@@ -124,6 +164,39 @@ export default function Home() {
             </div>
           )}
 
+          <div className="bg-white/3 rounded-xl p-4 border border-white/5">
+            <label className="block text-sm font-medium text-slate-300 mb-1.5">
+              Schiță profil (opțional)
+            </label>
+            <p className="text-xs text-slate-500 mb-2.5">
+              Încarcă o schiță reală a secțiunii (CDR, PDF sau JPG) — înlocuiește profilul aproximat cu forma exactă din schiță.
+            </p>
+            <input
+              type="file"
+              accept={SKETCH_ACCEPT}
+              onChange={e => {
+                const file = e.target.files?.[0];
+                if (file) handleSketchUpload(file);
+                e.target.value = '';
+              }}
+              className="block w-full text-xs text-slate-400 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-amber-500/20 file:text-amber-400 file:text-xs file:font-medium hover:file:bg-amber-500/30 file:cursor-pointer cursor-pointer"
+            />
+            {sketchLoading && (
+              <p className="text-xs text-amber-400 mt-2 animate-pulse">Se convertește schița...</p>
+            )}
+            {sketchError && (
+              <p className="text-xs text-red-400 mt-2">{sketchError}</p>
+            )}
+            {sketchSvg && !sketchLoading && (
+              <div className="flex items-center justify-between mt-2">
+                <span className="text-xs text-emerald-400">✓ {sketchName} — profil aplicat</span>
+                <button onClick={clearSketch} className="text-xs text-slate-500 hover:text-slate-300 underline">
+                  Elimină
+                </button>
+              </div>
+            )}
+          </div>
+
           <div>
             <p className="text-xs font-medium text-slate-400 mb-2.5 uppercase tracking-wider">Exemple rapide</p>
             <div className="flex flex-col gap-2">
@@ -177,7 +250,7 @@ export default function Home() {
               </div>
             </div>
           )}
-          <ThreeViewer params={params} />
+          <ThreeViewer params={viewerParams} />
         </div>
       </main>
     </div>

@@ -10,10 +10,17 @@ export interface ProductParams {
   profileStyle: ProfileStyle;
   finish: string;
   color: string;       // hex color
+  customProfileSvg?: string; // raw SVG markup traced from an uploaded sketch (CDR/PDF/JPG), overrides the preset profileStyle shape when present
 }
 
 export interface ExtractResult {
   success: boolean;
   params?: ProductParams;
+  error?: string;
+}
+
+export interface ConvertSketchResult {
+  success: boolean;
+  svg?: string;
   error?: string;
 }
