@@ -110,15 +110,35 @@ function buildShapeFromSVG(svgText: string, spanX: number, spanY: number): THREE
     return null;
   }
 
-  let best: THREE.Shape | null = null;
-  let bestArea = 0;
+  // Collect every candidate shape with its area and bounding box first — picking by area alone
+  // (the simplest heuristic) backfires on real CAD/PDF exports, where a drawing border or title
+  // block is routinely the single largest shape on the page, dwarfing the actual profile outline.
+  const candidates: { shape: THREE.Shape; area: number; box: THREE.Box2 }[] = [];
   for (const shapePath of paths) {
     for (const candidate of SVGLoader.createShapes(shapePath)) {
-      const area = Math.abs(THREE.ShapeUtils.area(candidate.getPoints(64)));
-      if (area > bestArea) {
-        bestArea = area;
-        best = candidate;
-      }
+      const pts = candidate.getPoints(64);
+      const area = Math.abs(THREE.ShapeUtils.area(pts));
+      if (area <= 0) continue;
+      const box = new THREE.Box2().setFromPoints(pts);
+      candidates.push({ shape: candidate, area, box });
+    }
+  }
+  if (candidates.length === 0) return null;
+
+  // A page-spanning border/frame covers almost the full extent of everything drawn; exclude any
+  // candidate that dominates the overall bounding box that way, unless it's all there is.
+  const overall = new THREE.Box2();
+  for (const c of candidates) overall.union(c.box);
+  const overallArea = (overall.max.x - overall.min.x) * (overall.max.y - overall.min.y);
+  const real = candidates.filter((c) => overallArea <= 0 || c.area / overallArea < 0.85);
+  const pool = real.length > 0 ? real : candidates;
+
+  let best: THREE.Shape | null = null;
+  let bestArea = 0;
+  for (const c of pool) {
+    if (c.area > bestArea) {
+      bestArea = c.area;
+      best = c.shape;
     }
   }
   if (!best) return null;

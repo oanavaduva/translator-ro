@@ -41,10 +41,19 @@ export async function extractVectorSVGFromPDF(buffer: Buffer): Promise<string | 
   const OPS = pdfjsLib.OPS;
 
   let ctm = IDENTITY;
-  const stack: Matrix[] = [];
+  const ctmStack: Matrix[] = [];
   let cur = { x: 0, y: 0 };
   let subStart = { x: 0, y: 0 };
-  let d = '';
+
+  // Path data is collected per "episode" (the run of construction ops between one painting
+  // operator and the next) and only kept if the episode actually ends in a paint op (stroke/fill).
+  // PDFs almost universally clip their content to the page/artboard with `re W n` — a path that's
+  // only ever used to clip (terminated by `n`/endPath, no stroke or fill) produces no visible ink,
+  // but its bounding rectangle is typically the single largest shape on the page. Keeping it would
+  // make the "largest area" profile picker downstream grab the page frame instead of the real
+  // profile outline, which is the bug this filtering exists to avoid.
+  let episode = '';
+  const episodes: string[] = [];
 
   // Flip Y so coordinates match the standard SVG/raster convention (origin top-left, Y down) —
   // the same convention buildShapeFromSVG (client-side) already assumes for traced sketches.
@@ -54,13 +63,13 @@ export async function extractVectorSVGFromPDF(buffer: Buffer): Promise<string | 
   function runPathOp(op: number, coords: number[], i: number): number {
     if (op === OPS.moveTo) {
       const s = toSvg(apply(ctm, coords[i], coords[i + 1]));
-      d += `M ${fmt(s.x)} ${fmt(s.y)} `;
+      episode += `M ${fmt(s.x)} ${fmt(s.y)} `;
       cur = s; subStart = s;
       return i + 2;
     }
     if (op === OPS.lineTo) {
       const s = toSvg(apply(ctm, coords[i], coords[i + 1]));
-      d += `L ${fmt(s.x)} ${fmt(s.y)} `;
+      episode += `L ${fmt(s.x)} ${fmt(s.y)} `;
       cur = s;
       return i + 2;
     }
@@ -68,7 +77,7 @@ export async function extractVectorSVGFromPDF(buffer: Buffer): Promise<string | 
       const p1 = toSvg(apply(ctm, coords[i], coords[i + 1]));
       const p2 = toSvg(apply(ctm, coords[i + 2], coords[i + 3]));
       const p3 = toSvg(apply(ctm, coords[i + 4], coords[i + 5]));
-      d += `C ${fmt(p1.x)} ${fmt(p1.y)} ${fmt(p2.x)} ${fmt(p2.y)} ${fmt(p3.x)} ${fmt(p3.y)} `;
+      episode += `C ${fmt(p1.x)} ${fmt(p1.y)} ${fmt(p2.x)} ${fmt(p2.y)} ${fmt(p3.x)} ${fmt(p3.y)} `;
       cur = p3;
       return i + 6;
     }
@@ -76,7 +85,7 @@ export async function extractVectorSVGFromPDF(buffer: Buffer): Promise<string | 
       // 'v' operator: first control point is the current point.
       const p2 = toSvg(apply(ctm, coords[i], coords[i + 1]));
       const p3 = toSvg(apply(ctm, coords[i + 2], coords[i + 3]));
-      d += `C ${fmt(cur.x)} ${fmt(cur.y)} ${fmt(p2.x)} ${fmt(p2.y)} ${fmt(p3.x)} ${fmt(p3.y)} `;
+      episode += `C ${fmt(cur.x)} ${fmt(cur.y)} ${fmt(p2.x)} ${fmt(p2.y)} ${fmt(p3.x)} ${fmt(p3.y)} `;
       cur = p3;
       return i + 4;
     }
@@ -84,12 +93,12 @@ export async function extractVectorSVGFromPDF(buffer: Buffer): Promise<string | 
       // 'y' operator: second control point equals the endpoint.
       const p1 = toSvg(apply(ctm, coords[i], coords[i + 1]));
       const p3 = toSvg(apply(ctm, coords[i + 2], coords[i + 3]));
-      d += `C ${fmt(p1.x)} ${fmt(p1.y)} ${fmt(p3.x)} ${fmt(p3.y)} ${fmt(p3.x)} ${fmt(p3.y)} `;
+      episode += `C ${fmt(p1.x)} ${fmt(p1.y)} ${fmt(p3.x)} ${fmt(p3.y)} ${fmt(p3.x)} ${fmt(p3.y)} `;
       cur = p3;
       return i + 4;
     }
     if (op === OPS.closePath) {
-      d += 'Z ';
+      episode += 'Z ';
       cur = subStart;
       return i;
     }
@@ -99,7 +108,7 @@ export async function extractVectorSVGFromPDF(buffer: Buffer): Promise<string | 
       const p1 = toSvg(apply(ctm, x + w, y));
       const p2 = toSvg(apply(ctm, x + w, y + h));
       const p3 = toSvg(apply(ctm, x, y + h));
-      d += `M ${fmt(p0.x)} ${fmt(p0.y)} L ${fmt(p1.x)} ${fmt(p1.y)} L ${fmt(p2.x)} ${fmt(p2.y)} L ${fmt(p3.x)} ${fmt(p3.y)} Z `;
+      episode += `M ${fmt(p0.x)} ${fmt(p0.y)} L ${fmt(p1.x)} ${fmt(p1.y)} L ${fmt(p2.x)} ${fmt(p2.y)} L ${fmt(p3.x)} ${fmt(p3.y)} Z `;
       cur = p0; subStart = p0;
       return i + 4;
     }
@@ -109,28 +118,54 @@ export async function extractVectorSVGFromPDF(buffer: Buffer): Promise<string | 
   const directPathOps = new Set([
     OPS.moveTo, OPS.lineTo, OPS.curveTo, OPS.curveTo2, OPS.curveTo3, OPS.closePath, OPS.rectangle,
   ]);
+  // Any of these terminates the current path episode with real ink (stroke and/or fill) —
+  // OPS.endPath ("n") terminates with no ink (clip-only or fully discarded) and is deliberately
+  // not in this set, so that episode gets dropped instead of kept.
+  const paintOps = new Set([
+    OPS.stroke, OPS.closeStroke, OPS.fill, OPS.eoFill,
+    OPS.fillStroke, OPS.eoFillStroke, OPS.closeFillStroke, OPS.closeEOFillStroke,
+  ]);
 
   for (let k = 0; k < opList.fnArray.length; k++) {
     const fn = opList.fnArray[k];
     const args = opList.argsArray[k] as number[];
 
     if (fn === OPS.save) {
-      stack.push(ctm);
+      ctmStack.push(ctm);
     } else if (fn === OPS.restore) {
-      ctm = stack.pop() ?? IDENTITY;
+      ctm = ctmStack.pop() ?? IDENTITY;
     } else if (fn === OPS.transform) {
       const [a, b, c, dd, e, f] = args;
       ctm = concat({ a, b, c, d: dd, e, f }, ctm);
+    } else if (fn === OPS.paintFormXObjectBegin) {
+      // Form XObjects (groups/layers — used pervasively by CorelDraw/Illustrator/AutoCAD PDF
+      // exports) have their content inlined into this same operator list by pdf.js, but their own
+      // /Matrix is only ever applied by the canvas renderer, never by the evaluator itself — we
+      // have to apply it ourselves or everything drawn inside the form ends up unscaled/unpositioned.
+      ctmStack.push(ctm);
+      const matrix = (args as unknown as [number[] | null, unknown])[0];
+      if (matrix) {
+        const [a, b, c, dd, e, f] = matrix;
+        ctm = concat({ a, b, c, d: dd, e, f }, ctm);
+      }
+    } else if (fn === OPS.paintFormXObjectEnd) {
+      ctm = ctmStack.pop() ?? IDENTITY;
     } else if (fn === OPS.constructPath) {
       const [opsArr, coordsArr] = args as unknown as [number[], number[]];
       let ci = 0;
       for (const op of opsArr) ci = runPathOp(op, coordsArr, ci);
     } else if (directPathOps.has(fn)) {
       runPathOp(fn, args, 0);
+    } else if (paintOps.has(fn)) {
+      if (episode.trim()) episodes.push(episode);
+      episode = '';
+    } else if (fn === OPS.endPath) {
+      episode = ''; // clip-only or unpainted path — discard, no visible ink
     }
   }
 
-  if (d.trim().length < 20) return null; // no meaningful vector path data — likely a scanned PDF
+  const d = episodes.join('').trim();
+  if (d.length < 20) return null; // no meaningful vector path data — likely a scanned PDF
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${pageWidth}" height="${pageHeight}" viewBox="0 0 ${pageWidth} ${pageHeight}"><path d="${d.trim()}"/></svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${pageWidth}" height="${pageHeight}" viewBox="0 0 ${pageWidth} ${pageHeight}"><path d="${d}"/></svg>`;
 }
