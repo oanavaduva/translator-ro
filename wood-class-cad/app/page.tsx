@@ -2,7 +2,7 @@
 
 import { useState, useCallback } from 'react';
 import dynamic from 'next/dynamic';
-import type { ProductParams } from '@/lib/types';
+import type { ProductParams, ProductType, ProfileStyle } from '@/lib/types';
 
 const ThreeViewer = dynamic(() => import('@/components/ThreeViewer'), {
   ssr: false,
@@ -22,6 +22,22 @@ const EXAMPLES = [
 ];
 
 const SKETCH_ACCEPT = '.jpg,.jpeg,.png,.pdf,.cdr';
+
+const DEFAULT_PARAMS: ProductParams = {
+  productType: 'plinta',
+  height: 70,
+  thickness: 12,
+  length: 2400,
+  profileStyle: 'classical',
+  finish: 'polimer natur',
+  color: '#C4A35A',
+};
+
+function defaultsForType(type: ProductType): Partial<ProductParams> {
+  if (type === 'cornisa') return { height: 100, thickness: 80, length: 2400 };
+  if (type === 'pardoseala_spc') return { width: 180, thickness: 8, length: 1220 };
+  return { height: 70, thickness: 12, length: 2400 };
+}
 
 export default function Home() {
   const [description, setDescription] = useState('');
@@ -80,6 +96,7 @@ export default function Home() {
       const data = await res.json();
       if (data.success) {
         setSketchSvg(data.svg);
+        setParams(prev => prev ?? DEFAULT_PARAMS);
       } else {
         setSketchSvg(null);
         setSketchError(data.error ?? 'Nu s-a putut converti schița');
@@ -98,6 +115,12 @@ export default function Home() {
     setSketchError('');
   };
 
+  const updateParams = (patch: Partial<ProductParams>) => {
+    setParams(prev => ({ ...(prev ?? DEFAULT_PARAMS), ...patch }));
+  };
+
+  const activeType = params?.productType ?? DEFAULT_PARAMS.productType;
+
   const viewerParams: ProductParams | null = params
     ? { ...params, customProfileSvg: sketchSvg ?? undefined }
     : null;
@@ -111,8 +134,8 @@ export default function Home() {
             W
           </div>
           <div>
-            <h1 className="font-semibold text-white text-sm">Wood Class · Text to CAD</h1>
-            <p className="text-xs text-slate-400">Generare modele 3D din descriere text</p>
+            <h1 className="font-semibold text-white text-sm">Wood Class · Imagine to CAD</h1>
+            <p className="text-xs text-slate-400">Generare schițe CAD și modele 3D din imagine (text opțional)</p>
           </div>
         </div>
         <div className="flex items-center gap-2 text-xs text-slate-500">
@@ -125,19 +148,147 @@ export default function Home() {
       <main className="flex-1 flex flex-col lg:flex-row gap-0 overflow-hidden">
         {/* Left panel */}
         <div className="lg:w-[420px] flex-shrink-0 flex flex-col border-r border-white/10 p-5 gap-5 overflow-y-auto">
+          {/* Image / sketch upload — primary entry point */}
+          <div className="bg-white/3 rounded-xl p-4 border border-amber-500/20">
+            <label className="block text-sm font-medium text-slate-200 mb-1.5">
+              Imagine profil
+            </label>
+            <p className="text-xs text-slate-500 mb-2.5">
+              Încarcă o imagine sau schiță a secțiunii (JPG, PNG, PDF sau CDR) — schița CAD și modelul 3D se generează automat din formă. Ajustează dimensiunile mai jos.
+            </p>
+            <input
+              type="file"
+              accept={SKETCH_ACCEPT}
+              onChange={e => {
+                const file = e.target.files?.[0];
+                if (file) handleSketchUpload(file);
+                e.target.value = '';
+              }}
+              className="block w-full text-xs text-slate-400 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-amber-500/20 file:text-amber-400 file:text-xs file:font-medium hover:file:bg-amber-500/30 file:cursor-pointer cursor-pointer"
+            />
+            {sketchLoading && (
+              <p className="text-xs text-amber-400 mt-2 animate-pulse">Se convertește imaginea...</p>
+            )}
+            {sketchError && (
+              <p className="text-xs text-red-400 mt-2">{sketchError}</p>
+            )}
+            {sketchSvg && !sketchLoading && (
+              <div className="flex items-center justify-between mt-2">
+                <span className="text-xs text-emerald-400">✓ {sketchName} — profil aplicat</span>
+                <button onClick={clearSketch} className="text-xs text-slate-500 hover:text-slate-300 underline">
+                  Elimină
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Manual dimensions — always editable, independent of text */}
+          <div className="bg-white/3 rounded-xl p-4 border border-white/5">
+            <label className="block text-sm font-medium text-slate-300 mb-2.5">
+              Dimensiuni produs
+            </label>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="col-span-2">
+                <label className="block text-xs text-slate-500 mb-1">Tip produs</label>
+                <select
+                  value={activeType}
+                  onChange={e => {
+                    const productType = e.target.value as ProductType;
+                    updateParams({ ...defaultsForType(productType), productType });
+                  }}
+                  className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500/50"
+                >
+                  <option value="plinta">Plintă</option>
+                  <option value="cornisa">Cornișă</option>
+                  <option value="pardoseala_spc">Pardoseală SPC</option>
+                </select>
+              </div>
+
+              {activeType === 'pardoseala_spc' ? (
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Lățime (mm)</label>
+                  <input
+                    type="number"
+                    value={params?.width ?? 180}
+                    onChange={e => updateParams({ width: Number(e.target.value) })}
+                    className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500/50"
+                  />
+                </div>
+              ) : (
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Înălțime (mm)</label>
+                  <input
+                    type="number"
+                    value={params?.height ?? DEFAULT_PARAMS.height}
+                    onChange={e => updateParams({ height: Number(e.target.value) })}
+                    className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500/50"
+                  />
+                </div>
+              )}
+
+              <div>
+                <label className="block text-xs text-slate-500 mb-1">Grosime (mm)</label>
+                <input
+                  type="number"
+                  value={params?.thickness ?? DEFAULT_PARAMS.thickness}
+                  onChange={e => updateParams({ thickness: Number(e.target.value) })}
+                  className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500/50"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs text-slate-500 mb-1">Lungime (mm)</label>
+                <input
+                  type="number"
+                  value={params?.length ?? DEFAULT_PARAMS.length}
+                  onChange={e => updateParams({ length: Number(e.target.value) })}
+                  className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500/50"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs text-slate-500 mb-1">Culoare</label>
+                <input
+                  type="color"
+                  value={params?.color ?? DEFAULT_PARAMS.color}
+                  onChange={e => updateParams({ color: e.target.value })}
+                  className="w-full h-[38px] bg-white/5 border border-white/10 rounded-lg cursor-pointer"
+                />
+              </div>
+
+              {activeType !== 'pardoseala_spc' && (
+                <div className="col-span-2">
+                  <label className="block text-xs text-slate-500 mb-1">Profil (dacă nu ai încărcat o imagine)</label>
+                  <select
+                    value={params?.profileStyle ?? DEFAULT_PARAMS.profileStyle}
+                    onChange={e => updateParams({ profileStyle: e.target.value as ProfileStyle })}
+                    className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500/50"
+                  >
+                    <option value="straight">Drept</option>
+                    <option value="rounded">Rotund</option>
+                    <option value="stepped">În trepte</option>
+                    <option value="classical">Clasic</option>
+                    <option value="modern">Modern</option>
+                  </select>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Text description — optional */}
           <div>
             <label className="block text-sm font-medium text-slate-300 mb-2">
-              Descriere produs
+              Descriere text (opțional)
             </label>
             <textarea
               value={description}
               onChange={e => setDescription(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder="Ex: Plintă 7cm înălțime, 1.2cm grosime, 2.4m lungime, profil clasic, finisaj stejar natural..."
-              rows={5}
+              rows={4}
               className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-slate-500 resize-none focus:outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/30 transition-all"
             />
-            <p className="text-xs text-slate-500 mt-1.5">Ctrl+Enter pentru a genera</p>
+            <p className="text-xs text-slate-500 mt-1.5">Ctrl+Enter pentru a extrage parametrii din text</p>
           </div>
 
           <button
@@ -154,7 +305,7 @@ export default function Home() {
                 Extrage parametrii...
               </>
             ) : (
-              'Generează model 3D'
+              'Extrage parametri din descriere'
             )}
           </button>
 
@@ -163,39 +314,6 @@ export default function Home() {
               {error}
             </div>
           )}
-
-          <div className="bg-white/3 rounded-xl p-4 border border-white/5">
-            <label className="block text-sm font-medium text-slate-300 mb-1.5">
-              Schiță profil (opțional)
-            </label>
-            <p className="text-xs text-slate-500 mb-2.5">
-              Încarcă o schiță reală a secțiunii (CDR, PDF sau JPG) — înlocuiește profilul aproximat cu forma exactă din schiță.
-            </p>
-            <input
-              type="file"
-              accept={SKETCH_ACCEPT}
-              onChange={e => {
-                const file = e.target.files?.[0];
-                if (file) handleSketchUpload(file);
-                e.target.value = '';
-              }}
-              className="block w-full text-xs text-slate-400 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-amber-500/20 file:text-amber-400 file:text-xs file:font-medium hover:file:bg-amber-500/30 file:cursor-pointer cursor-pointer"
-            />
-            {sketchLoading && (
-              <p className="text-xs text-amber-400 mt-2 animate-pulse">Se convertește schița...</p>
-            )}
-            {sketchError && (
-              <p className="text-xs text-red-400 mt-2">{sketchError}</p>
-            )}
-            {sketchSvg && !sketchLoading && (
-              <div className="flex items-center justify-between mt-2">
-                <span className="text-xs text-emerald-400">✓ {sketchName} — profil aplicat</span>
-                <button onClick={clearSketch} className="text-xs text-slate-500 hover:text-slate-300 underline">
-                  Elimină
-                </button>
-              </div>
-            )}
-          </div>
 
           <div>
             <p className="text-xs font-medium text-slate-400 mb-2.5 uppercase tracking-wider">Exemple rapide</p>
@@ -220,6 +338,7 @@ export default function Home() {
                 ['OBJ → Blender', 'Import OBJ, aplică textură din biblioteca noastră, render Cycles/EEVEE'],
                 ['DAE → SketchUp', 'File → Import → DAE, apoi V-Ray sau Enscape pentru randări'],
                 ['STL → CNC', 'Verificare profil, frezare sau imprimare 3D'],
+                ['DXF → AutoCAD', 'Schiță 2D a secțiunii pentru documentație tehnică'],
               ].map(([title, desc], i) => (
                 <li key={i} className="flex gap-2.5">
                   <span className="flex-shrink-0 w-5 h-5 rounded-full bg-amber-500/20 text-amber-400 text-[10px] flex items-center justify-center font-bold">{i + 1}</span>
@@ -245,7 +364,7 @@ export default function Home() {
               <div>
                 <p className="text-slate-500 font-medium mb-1">Preview 3D</p>
                 <p className="text-slate-600 text-sm max-w-[260px]">
-                  Descrie un produs în câmpul din stânga și apasă &ldquo;Generează&rdquo;
+                  Încarcă o imagine cu profilul sau ajustează dimensiunile din stânga pentru a genera modelul
                 </p>
               </div>
             </div>
