@@ -206,15 +206,35 @@ function createProductGeometry(params: ProductParams): THREE.BufferGeometry {
   return new THREE.ExtrudeGeometry(shape, { depth: l, bevelEnabled: false, steps: 1 });
 }
 
+// ExtrudeGeometry's default WorldUVGenerator maps UVs straight from local geometry coordinates,
+// which are already in meters (see the /1000 conversions above) — there's no normalized 0-1 step.
+// So a single repeat factor, expressed as "1 over the real-world size one texture tile should
+// cover", tiles consistently across both the end caps and the long side faces with no per-axis
+// special-casing. 0.15m (15cm) matches a typical close-up wood/grain photo's apparent coverage.
+const TEXTURE_TILE_SIZE_M = 0.15;
+
+function loadProductTexture(dataUrl: string, onLoad: (tex: THREE.Texture) => void): void {
+  new THREE.TextureLoader().load(dataUrl, (tex) => {
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.wrapT = THREE.RepeatWrapping;
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const repeat = 1 / TEXTURE_TILE_SIZE_M;
+    tex.repeat.set(repeat, repeat);
+    onLoad(tex);
+  });
+}
+
 // ─── OBJ Exporter ─────────────────────────────────────────────────────────────
 
-function exportToOBJ(mesh: THREE.Mesh, productName: string, color: string): void {
+function exportToOBJ(mesh: THREE.Mesh, productName: string, color: string, textureDataUrl?: string): void {
   const geo = mesh.geometry.clone();
   geo.computeVertexNormals();
 
   const positions = geo.attributes.position;
   const normals = geo.attributes.normal;
+  const uvs = geo.attributes.uv;
   const index = geo.index;
+  const repeat = 1 / TEXTURE_TILE_SIZE_M; // matches the live viewer's tiling — see loadProductTexture
 
   let obj = `# Wood Class CAD Export\n# ${productName}\n\nmtllib ${productName}.mtl\nusemtl material\n\n`;
 
@@ -222,32 +242,43 @@ function exportToOBJ(mesh: THREE.Mesh, productName: string, color: string): void
     obj += `v ${positions.getX(i).toFixed(6)} ${positions.getY(i).toFixed(6)} ${positions.getZ(i).toFixed(6)}\n`;
   }
   obj += '\n';
+  if (textureDataUrl) {
+    for (let i = 0; i < uvs.count; i++) {
+      obj += `vt ${(uvs.getX(i) * repeat).toFixed(6)} ${(uvs.getY(i) * repeat).toFixed(6)}\n`;
+    }
+    obj += '\n';
+  }
   for (let i = 0; i < normals.count; i++) {
     obj += `vn ${normals.getX(i).toFixed(6)} ${normals.getY(i).toFixed(6)} ${normals.getZ(i).toFixed(6)}\n`;
   }
   obj += '\ng mesh\n';
 
+  const face = (a: number, b: number, c: number) =>
+    textureDataUrl ? `f ${a}/${a}/${a} ${b}/${b}/${b} ${c}/${c}/${c}\n` : `f ${a}//${a} ${b}//${b} ${c}//${c}\n`;
+
   if (index) {
     for (let i = 0; i < index.count; i += 3) {
-      const a = index.getX(i) + 1;
-      const b = index.getX(i + 1) + 1;
-      const c = index.getX(i + 2) + 1;
-      obj += `f ${a}//${a} ${b}//${b} ${c}//${c}\n`;
+      obj += face(index.getX(i) + 1, index.getX(i + 1) + 1, index.getX(i + 2) + 1);
     }
   } else {
     for (let i = 0; i < positions.count; i += 3) {
-      const a = i + 1, b = i + 2, c = i + 3;
-      obj += `f ${a}//${a} ${b}//${b} ${c}//${c}\n`;
+      obj += face(i + 1, i + 2, i + 3);
     }
   }
 
   const r = parseInt(color.slice(1, 3), 16) / 255;
   const g = parseInt(color.slice(3, 5), 16) / 255;
   const b = parseInt(color.slice(5, 7), 16) / 255;
-  const mtl = `# Wood Class Material\nnewmtl material\nKa ${r.toFixed(4)} ${g.toFixed(4)} ${b.toFixed(4)}\nKd ${r.toFixed(4)} ${g.toFixed(4)} ${b.toFixed(4)}\nKs 0.1 0.1 0.1\nNs 30\nd 1.0\n`;
+  // White Kd when textured — the diffuse map should carry the real color, not be tinted by the hex swatch.
+  const kd = textureDataUrl ? '1.0000 1.0000 1.0000' : `${r.toFixed(4)} ${g.toFixed(4)} ${b.toFixed(4)}`;
+  const mapLine = textureDataUrl ? `map_Kd ${productName}.jpg\n` : '';
+  const mtl = `# Wood Class Material\nnewmtl material\nKa ${r.toFixed(4)} ${g.toFixed(4)} ${b.toFixed(4)}\nKd ${kd}\nKs 0.1 0.1 0.1\nNs 30\nd 1.0\n${mapLine}`;
 
   downloadFile(`${productName}.obj`, obj, 'text/plain');
   downloadFile(`${productName}.mtl`, mtl, 'text/plain');
+  if (textureDataUrl) {
+    downloadFile(`${productName}.jpg`, dataUrlToBlob(textureDataUrl), 'image/jpeg');
+  }
 }
 
 // ─── STL Exporter ─────────────────────────────────────────────────────────────
@@ -302,38 +333,80 @@ function exportToSTL(mesh: THREE.Mesh, productName: string): void {
 
 // ─── DAE (Collada) Exporter ───────────────────────────────────────────────────
 
-function exportToDAE(mesh: THREE.Mesh, productName: string, color: string): void {
+function exportToDAE(mesh: THREE.Mesh, productName: string, color: string, textureDataUrl?: string): void {
   const geo = mesh.geometry.clone();
   geo.computeVertexNormals();
 
   const positions = geo.attributes.position;
   const normals = geo.attributes.normal;
+  const uvs = geo.attributes.uv;
   const index = geo.index;
+  const repeat = 1 / TEXTURE_TILE_SIZE_M; // matches the live viewer's tiling — see loadProductTexture
 
   const posArr: number[] = [];
   const nrmArr: number[] = [];
+  const uvArr: number[] = [];
   const triArr: string[] = [];
 
   for (let i = 0; i < positions.count; i++) {
     posArr.push(positions.getX(i), positions.getY(i), positions.getZ(i));
     nrmArr.push(normals.getX(i), normals.getY(i), normals.getZ(i));
+    if (textureDataUrl) uvArr.push(uvs.getX(i) * repeat, uvs.getY(i) * repeat);
   }
+
+  const pushTri = (a: number, b: number, c: number) =>
+    triArr.push(textureDataUrl
+      ? `${a} ${a} ${a} ${b} ${b} ${b} ${c} ${c} ${c}`
+      : `${a} ${a} ${b} ${b} ${c} ${c}`);
 
   const triCount = index ? index.count / 3 : positions.count / 3;
   if (index) {
     for (let i = 0; i < index.count; i += 3) {
-      const a = index.getX(i), b = index.getX(i + 1), c = index.getX(i + 2);
-      triArr.push(`${a} ${a} ${b} ${b} ${c} ${c}`);
+      pushTri(index.getX(i), index.getX(i + 1), index.getX(i + 2));
     }
   } else {
     for (let i = 0; i < positions.count; i += 3) {
-      triArr.push(`${i} ${i} ${i + 1} ${i + 1} ${i + 2} ${i + 2}`);
+      pushTri(i, i + 1, i + 2);
     }
   }
 
   const r = parseInt(color.slice(1, 3), 16) / 255;
   const g = parseInt(color.slice(3, 5), 16) / 255;
   const b = parseInt(color.slice(5, 7), 16) / 255;
+
+  // External sibling image file (same pattern as OBJ+MTL+jpg) — broader-compatibility bet than
+  // an inline base64 data URI, since not every COLLADA importer (incl. SketchUp) supports that.
+  const imageLib = textureDataUrl ? `
+  <library_images>
+    <image id="tex-img" name="tex-img">
+      <init_from>${productName}.jpg</init_from>
+    </image>
+  </library_images>` : '';
+
+  const samplerParams = textureDataUrl ? `
+          <newparam sid="tex-surface">
+            <surface type="2D"><init_from>tex-img</init_from></surface>
+          </newparam>
+          <newparam sid="tex-sampler">
+            <sampler2D><source>tex-surface</source></sampler2D>
+          </newparam>` : '';
+
+  const diffuse = textureDataUrl
+    ? `<texture texture="tex-sampler" texcoord="UVSET0"/>`
+    : `<color>${r.toFixed(4)} ${g.toFixed(4)} ${b.toFixed(4)} 1</color>`;
+
+  const uvSource = textureDataUrl ? `
+        <source id="uv">
+          <float_array id="uv-arr" count="${uvArr.length}">${uvArr.map(v => v.toFixed(6)).join(' ')}</float_array>
+          <technique_common>
+            <accessor source="#uv-arr" count="${uvArr.length / 2}" stride="2">
+              <param name="S" type="float"/><param name="T" type="float"/>
+            </accessor>
+          </technique_common>
+        </source>` : '';
+
+  const uvInput = textureDataUrl ? `
+          <input semantic="TEXCOORD" source="#uv" offset="2" set="0"/>` : '';
 
   const now = new Date().toISOString();
   const dae = `<?xml version="1.0" encoding="utf-8"?>
@@ -343,13 +416,13 @@ function exportToDAE(mesh: THREE.Mesh, productName: string, color: string): void
     <modified>${now}</modified>
     <unit name="meter" meter="1"/>
     <up_axis>Y_UP</up_axis>
-  </asset>
+  </asset>${imageLib}
   <library_effects>
     <effect id="mat-fx">
-      <profile_COMMON>
+      <profile_COMMON>${samplerParams}
         <technique sid="common">
           <phong>
-            <diffuse><color>${r.toFixed(4)} ${g.toFixed(4)} ${b.toFixed(4)} 1</color></diffuse>
+            <diffuse>${diffuse}</diffuse>
             <specular><color>0.1 0.1 0.1 1</color></specular>
             <shininess><float>30</float></shininess>
           </phong>
@@ -380,13 +453,13 @@ function exportToDAE(mesh: THREE.Mesh, productName: string, color: string): void
               <param name="X" type="float"/><param name="Y" type="float"/><param name="Z" type="float"/>
             </accessor>
           </technique_common>
-        </source>
+        </source>${uvSource}
         <vertices id="verts">
           <input semantic="POSITION" source="#pos"/>
         </vertices>
         <triangles count="${triCount}" material="mat">
           <input semantic="VERTEX" source="#verts" offset="0"/>
-          <input semantic="NORMAL" source="#nrm" offset="1"/>
+          <input semantic="NORMAL" source="#nrm" offset="1"/>${uvInput}
           <p>${triArr.join(' ')}</p>
         </triangles>
       </mesh>
@@ -398,7 +471,9 @@ function exportToDAE(mesh: THREE.Mesh, productName: string, color: string): void
         <instance_geometry url="#mesh-geom">
           <bind_material>
             <technique_common>
-              <instance_material symbol="mat" target="#mat"/>
+              <instance_material symbol="mat" target="#mat">${textureDataUrl ? `
+                <bind_vertex_input semantic="UVSET0" input_semantic="TEXCOORD" input_set="0"/>` : ''}
+              </instance_material>
             </technique_common>
           </bind_material>
         </instance_geometry>
@@ -409,6 +484,9 @@ function exportToDAE(mesh: THREE.Mesh, productName: string, color: string): void
 </COLLADA>`;
 
   downloadFile(`${productName}.dae`, dae, 'model/vnd.collada+xml');
+  if (textureDataUrl) {
+    downloadFile(`${productName}.jpg`, dataUrlToBlob(textureDataUrl), 'image/jpeg');
+  }
 }
 
 // ─── DXF (2D CAD sketch) Exporter ─────────────────────────────────────────────
@@ -448,6 +526,15 @@ function downloadFile(filename: string, content: string | Blob, type: string): v
   a.download = filename;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+function dataUrlToBlob(dataUrl: string): Blob {
+  const [header, base64] = dataUrl.split(',');
+  const mime = header.match(/data:(.*?);base64/)?.[1] ?? 'image/jpeg';
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return new Blob([bytes], { type: mime });
 }
 
 function productLabel(params: ProductParams): string {
@@ -555,10 +642,14 @@ export default function ThreeViewer({ params }: Props) {
     const camera = cameraRef.current;
     if (!scene || !camera) return;
 
-    // Remove old mesh
+    // Remove old mesh (material + texture too — textures from uploaded photos are sizeable
+    // GPU resources and would otherwise leak on every params change)
     if (meshRef.current) {
       scene.remove(meshRef.current);
       meshRef.current.geometry.dispose();
+      const oldMat = meshRef.current.material as THREE.MeshStandardMaterial;
+      oldMat.map?.dispose();
+      oldMat.dispose();
       meshRef.current = null;
     }
 
@@ -567,8 +658,10 @@ export default function ThreeViewer({ params }: Props) {
     const geo = createProductGeometry(params);
     geo.computeVertexNormals();
 
+    // White base color when a texture is present — tinting an uploaded real photo by the hex
+    // `color` field would distort it instead of just providing a solid-color fallback.
     const mat = new THREE.MeshStandardMaterial({
-      color: new THREE.Color(params.color),
+      color: params.textureDataUrl ? '#ffffff' : new THREE.Color(params.color),
       roughness: 0.65,
       metalness: 0.05,
     });
@@ -578,6 +671,15 @@ export default function ThreeViewer({ params }: Props) {
     mesh.receiveShadow = true;
     scene.add(mesh);
     meshRef.current = mesh;
+
+    let cancelled = false;
+    if (params.textureDataUrl) {
+      loadProductTexture(params.textureDataUrl, (tex) => {
+        if (cancelled) { tex.dispose(); return; }
+        mat.map = tex;
+        mat.needsUpdate = true;
+      });
+    }
 
     // Fit camera to model — these products are long and thin (length >> height/thickness),
     // so a fixed-ratio camera offset puts most of the distance budget along the long axis
@@ -618,11 +720,15 @@ export default function ThreeViewer({ params }: Props) {
 
     controlsRef.current!.target.set(0, 0, 0);
     controlsRef.current!.update();
+
+    return () => {
+      cancelled = true;
+    };
   }, [params]);
 
   const handleExportOBJ = useCallback(() => {
     if (!meshRef.current || !params) return;
-    exportToOBJ(meshRef.current, productLabel(params), params.color);
+    exportToOBJ(meshRef.current, productLabel(params), params.color, params.textureDataUrl);
   }, [params]);
 
   const handleExportSTL = useCallback(() => {
@@ -632,7 +738,7 @@ export default function ThreeViewer({ params }: Props) {
 
   const handleExportDAE = useCallback(() => {
     if (!meshRef.current || !params) return;
-    exportToDAE(meshRef.current, productLabel(params), params.color);
+    exportToDAE(meshRef.current, productLabel(params), params.color, params.textureDataUrl);
   }, [params]);
 
   const handleExportDXF = useCallback(() => {
@@ -699,13 +805,18 @@ export default function ThreeViewer({ params }: Props) {
             <span>{params.customProfileSvg ? 'din schiță încărcată' : params.profileStyle}</span>
             <span className="text-slate-400">Finisaj:</span>
             <span>{params.finish}</span>
-            <span className="text-slate-400">Culoare:</span>
+            <span className="text-slate-400">{params.textureDataUrl ? 'Textură:' : 'Culoare:'}</span>
             <span className="flex items-center gap-2">
-              <span
-                className="inline-block w-4 h-4 rounded border border-white/20"
-                style={{ background: params.color }}
-              />
-              {params.color}
+              {params.textureDataUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={params.textureDataUrl} alt="" className="w-4 h-4 rounded object-cover border border-white/20" />
+              ) : (
+                <span
+                  className="inline-block w-4 h-4 rounded border border-white/20"
+                  style={{ background: params.color }}
+                />
+              )}
+              {params.textureDataUrl ? 'încărcată de utilizator' : params.color}
             </span>
           </div>
         </div>

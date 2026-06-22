@@ -11,6 +11,7 @@ export interface ProductParams {
   finish: string;
   color: string;       // hex color
   customProfileSvg?: string; // raw SVG markup traced from an uploaded sketch (CDR/PDF/JPG), overrides the preset profileStyle shape when present
+  textureDataUrl?: string; // user-uploaded texture photo, normalized client-side to a capped-size JPEG data URL; when present, replaces the solid `color` fill on the 3D model and in exports
 }
 
 export interface ExtractResult {

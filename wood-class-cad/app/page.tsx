@@ -22,6 +22,41 @@ const EXAMPLES = [
 ];
 
 const SKETCH_ACCEPT = '.jpg,.jpeg,.png,.pdf,.cdr';
+const TEXTURE_ACCEPT = 'image/*';
+const TEXTURE_MAX_DIM = 1024;
+
+// Decodes whatever raster format the browser supports and re-encodes it as a capped-size JPEG
+// data URL — this is the "convert to the format needed for implementation" step: a single format
+// (JPEG data URL) that THREE.TextureLoader and the OBJ/DAE exporters below can all consume directly,
+// without round-tripping the (potentially huge) original photo through a server request.
+async function normalizeTextureImage(file: File): Promise<string> {
+  const rawDataUrl: string = await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(new Error('Nu s-a putut citi fișierul'));
+    reader.readAsDataURL(file);
+  });
+
+  const img: HTMLImageElement = await new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error('Format de imagine necunoscut'));
+    image.src = rawDataUrl;
+  });
+
+  const scale = Math.min(1, TEXTURE_MAX_DIM / Math.max(img.width, img.height));
+  const w = Math.max(1, Math.round(img.width * scale));
+  const h = Math.max(1, Math.round(img.height * scale));
+
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('Canvas indisponibil în acest browser');
+  ctx.drawImage(img, 0, 0, w, h);
+
+  return canvas.toDataURL('image/jpeg', 0.85);
+}
 
 const DEFAULT_PARAMS: ProductParams = {
   productType: 'plinta',
@@ -49,6 +84,11 @@ export default function Home() {
   const [sketchSvg, setSketchSvg] = useState<string | null>(null);
   const [sketchLoading, setSketchLoading] = useState(false);
   const [sketchError, setSketchError] = useState('');
+
+  const [textureName, setTextureName] = useState('');
+  const [textureDataUrl, setTextureDataUrl] = useState<string | null>(null);
+  const [textureLoading, setTextureLoading] = useState(false);
+  const [textureError, setTextureError] = useState('');
 
   const handleExtract = useCallback(async (text?: string) => {
     const input = text ?? description;
@@ -115,6 +155,28 @@ export default function Home() {
     setSketchError('');
   };
 
+  const handleTextureUpload = useCallback(async (file: File) => {
+    setTextureLoading(true);
+    setTextureError('');
+    setTextureName(file.name);
+    try {
+      const dataUrl = await normalizeTextureImage(file);
+      setTextureDataUrl(dataUrl);
+      setParams(prev => prev ?? DEFAULT_PARAMS);
+    } catch (err) {
+      setTextureDataUrl(null);
+      setTextureError(err instanceof Error ? err.message : 'Nu s-a putut încărca textura');
+    } finally {
+      setTextureLoading(false);
+    }
+  }, []);
+
+  const clearTexture = () => {
+    setTextureName('');
+    setTextureDataUrl(null);
+    setTextureError('');
+  };
+
   const updateParams = (patch: Partial<ProductParams>) => {
     setParams(prev => ({ ...(prev ?? DEFAULT_PARAMS), ...patch }));
   };
@@ -122,7 +184,7 @@ export default function Home() {
   const activeType = params?.productType ?? DEFAULT_PARAMS.productType;
 
   const viewerParams: ProductParams | null = params
-    ? { ...params, customProfileSvg: sketchSvg ?? undefined }
+    ? { ...params, customProfileSvg: sketchSvg ?? undefined, textureDataUrl: textureDataUrl ?? undefined }
     : null;
 
   return (
@@ -273,6 +335,44 @@ export default function Home() {
                 </div>
               )}
             </div>
+          </div>
+
+          {/* Texture upload — applies to all product types; overrides solid color on model + exports */}
+          <div className="bg-white/3 rounded-xl p-4 border border-white/5">
+            <label className="block text-sm font-medium text-slate-200 mb-1.5">
+              Textură (opțional)
+            </label>
+            <p className="text-xs text-slate-500 mb-2.5">
+              Încarcă o poză cu textura reală (lemn, gri antichizat etc.) — se aplică pe model și în exporturi, în locul culorii solide.
+            </p>
+            <input
+              type="file"
+              accept={TEXTURE_ACCEPT}
+              onChange={e => {
+                const file = e.target.files?.[0];
+                if (file) handleTextureUpload(file);
+                e.target.value = '';
+              }}
+              className="block w-full text-xs text-slate-400 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-emerald-500/20 file:text-emerald-400 file:text-xs file:font-medium hover:file:bg-emerald-500/30 file:cursor-pointer cursor-pointer"
+            />
+            {textureLoading && (
+              <p className="text-xs text-emerald-400 mt-2 animate-pulse">Se procesează textura...</p>
+            )}
+            {textureError && (
+              <p className="text-xs text-red-400 mt-2">{textureError}</p>
+            )}
+            {textureDataUrl && !textureLoading && (
+              <div className="flex items-center justify-between mt-2 gap-2">
+                <span className="text-xs text-emerald-400 flex items-center gap-2 truncate">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={textureDataUrl} alt="" className="w-6 h-6 rounded object-cover border border-white/20 flex-shrink-0" />
+                  <span className="truncate">✓ {textureName} — textură aplicată</span>
+                </span>
+                <button onClick={clearTexture} className="text-xs text-slate-500 hover:text-slate-300 underline flex-shrink-0">
+                  Elimină
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Text description — optional */}
