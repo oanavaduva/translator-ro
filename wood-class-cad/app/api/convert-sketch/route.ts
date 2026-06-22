@@ -5,6 +5,7 @@ import { tmpdir } from 'os';
 import path from 'path';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
+import { extractVectorSVGFromPDF } from '@/lib/pdfVectorExtract';
 
 export const runtime = 'nodejs';
 
@@ -51,39 +52,61 @@ export async function POST(request: NextRequest) {
     const buffer = Buffer.from(await file.arrayBuffer());
     let svg: string;
 
-    if (ext === '.pdf' || ext === '.cdr') {
-      workDir = await mkdtemp(path.join(tmpdir(), 'sketch-'));
-      const inputPath = path.join(workDir, `input${ext}`);
-      await writeFile(inputPath, buffer);
-      const outputBase = path.join(workDir, 'output');
+    if (ext === '.pdf') {
+      // Pure-JS extraction straight from the PDF content stream — works in any environment
+      // (including serverless/Vercel, with no system binaries required).
+      const vectorSvg = await extractVectorSVGFromPDF(buffer);
 
-      if (ext === '.pdf') {
-        await execFileAsync('pdftocairo', ['-svg', '-f', '1', '-l', '1', inputPath, `${outputBase}.svg`], EXEC_OPTS);
-        svg = await readFile(`${outputBase}.svg`, 'utf-8');
-
-        if (!hasVectorPaths(svg)) {
-          // Scanned/raster PDF — no vector paths to extract. Rasterize the page and trace it instead.
+      if (vectorSvg) {
+        svg = vectorSvg;
+      } else {
+        // Scanned/raster PDF — no vector paths to extract. Fall back to rasterizing the page
+        // and tracing it, when poppler is actually installed (e.g. local/dev); this isn't
+        // available on serverless platforms like Vercel.
+        try {
+          workDir = await mkdtemp(path.join(tmpdir(), 'sketch-'));
+          const inputPath = path.join(workDir, `input${ext}`);
+          await writeFile(inputPath, buffer);
+          const outputBase = path.join(workDir, 'output');
           await execFileAsync('pdftoppm', ['-png', '-r', '200', '-singlefile', '-f', '1', inputPath, outputBase], EXEC_OPTS);
           const png = await readFile(`${outputBase}.png`);
           svg = await tracePotrace(png);
-        }
-      } else {
-        try {
-          const { stdout } = await execFileAsync('cdr2xhtml', [inputPath], EXEC_OPTS);
-          svg = stdout;
         } catch {
           return NextResponse.json(
-            { success: false, error: 'Fișierul CDR nu a putut fi citit (format nesuportat, versiune veche sau criptat)' },
+            {
+              success: false,
+              error: 'Acest PDF nu conține curbe vectoriale (e probabil un scan). Încarcă o poză (JPG/PNG) a schiței în loc.',
+            },
             { status: 400 }
           );
         }
+      }
+    } else if (ext === '.cdr') {
+      workDir = await mkdtemp(path.join(tmpdir(), 'sketch-'));
+      const inputPath = path.join(workDir, `input${ext}`);
+      await writeFile(inputPath, buffer);
 
-        if (!hasVectorPaths(svg)) {
-          return NextResponse.json(
-            { success: false, error: 'Nu s-au putut extrage curbe vectoriale din fișierul CDR' },
-            { status: 400 }
-          );
-        }
+      try {
+        const { stdout } = await execFileAsync('cdr2xhtml', [inputPath], EXEC_OPTS);
+        svg = stdout;
+      } catch (err) {
+        const notInstalled = (err as NodeJS.ErrnoException)?.code === 'ENOENT';
+        return NextResponse.json(
+          {
+            success: false,
+            error: notInstalled
+              ? 'Fișierele CDR nu sunt suportate în acest mediu. Exportă din CorelDraw ca PDF sau imagine (JPG/PNG) și încarcă fișierul rezultat.'
+              : 'Fișierul CDR nu a putut fi citit (format nesuportat, versiune veche sau criptat)',
+          },
+          { status: 400 }
+        );
+      }
+
+      if (!hasVectorPaths(svg)) {
+        return NextResponse.json(
+          { success: false, error: 'Nu s-au putut extrage curbe vectoriale din fișierul CDR' },
+          { status: 400 }
+        );
       }
     } else {
       svg = await tracePotrace(buffer);
