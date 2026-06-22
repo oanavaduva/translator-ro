@@ -147,18 +147,17 @@ function buildShapeFromSVG(svgText: string, spanX: number, spanY: number): THREE
   return remapped;
 }
 
-function createProductGeometry(params: ProductParams): THREE.BufferGeometry {
-  const { productType, height, thickness, width, length, profileStyle, customProfileSvg } = params;
+// The 2D cross-section profile is shared by the 3D extrusion and the DXF sketch export,
+// so both always represent the exact same shape (preset style or traced upload alike).
+function getProfileShape(params: ProductParams): THREE.Shape {
+  const { productType, height, thickness, width, profileStyle, customProfileSvg } = params;
   const h = height / 1000;
   const t = thickness / 1000;
-  const l = length / 1000;
 
   if (productType === 'pardoseala_spc') {
     const w = (width ?? 180) / 1000;
     const traced = customProfileSvg ? buildShapeFromSVG(customProfileSvg, w, t) : null;
-    if (traced) {
-      return new THREE.ExtrudeGeometry(traced, { depth: l, bevelEnabled: false });
-    }
+    if (traced) return traced;
 
     // SPC panel - bevel the top edges slightly for realism
     const shape = new THREE.Shape();
@@ -172,26 +171,19 @@ function createProductGeometry(params: ProductParams): THREE.BufferGeometry {
     shape.lineTo(0, t - bevel);
     shape.lineTo(0, bevel);
     shape.closePath();
-    // Shape already spans width along X and thickness along Y (extrude depth = length along Z),
-    // so the panel lies flat with thickness vertical — no rotation needed.
-    return new THREE.ExtrudeGeometry(shape, {
-      depth: l,
-      bevelEnabled: false,
-    });
+    return shape;
   }
 
-  let shape: THREE.Shape | null = customProfileSvg ? buildShapeFromSVG(customProfileSvg, t, h) : null;
-  if (!shape) {
-    shape = productType === 'cornisa' ? buildCornisaShape(h, t, profileStyle) : buildPlintaShape(h, t, profileStyle);
-  }
+  const traced = customProfileSvg ? buildShapeFromSVG(customProfileSvg, t, h) : null;
+  return traced ?? (productType === 'cornisa' ? buildCornisaShape(h, t, profileStyle) : buildPlintaShape(h, t, profileStyle));
+}
 
-  const geo = new THREE.ExtrudeGeometry(shape, {
-    depth: l,
-    bevelEnabled: false,
-    steps: 1,
-  });
-
-  return geo;
+function createProductGeometry(params: ProductParams): THREE.BufferGeometry {
+  const shape = getProfileShape(params);
+  const l = params.length / 1000;
+  // Shape already spans width/thickness along X and height/thickness along Y (extrude depth =
+  // length along Z), so the piece lies in its natural orientation — no rotation needed.
+  return new THREE.ExtrudeGeometry(shape, { depth: l, bevelEnabled: false, steps: 1 });
 }
 
 // ─── OBJ Exporter ─────────────────────────────────────────────────────────────
@@ -399,6 +391,33 @@ function exportToDAE(mesh: THREE.Mesh, productName: string, color: string): void
   downloadFile(`${productName}.dae`, dae, 'model/vnd.collada+xml');
 }
 
+// ─── DXF (2D CAD sketch) Exporter ─────────────────────────────────────────────
+
+function exportToDXF(shape: THREE.Shape, productName: string): void {
+  // Profile coordinates are in meters (extrusion convention); DXF sketches use mm.
+  const pts = shape.getPoints(128).map(p => ({ x: p.x * 1000, y: p.y * 1000 }));
+
+  const lines: string[] = [
+    '0', 'SECTION', '2', 'HEADER',
+    '9', '$ACADVER', '1', 'AC1009',
+    '9', '$INSUNITS', '70', '4', // 4 = millimeters
+    '0', 'ENDSEC',
+    '0', 'SECTION', '2', 'ENTITIES',
+    '0', 'POLYLINE',
+    '8', 'PROFIL',
+    '66', '1',
+    '70', '1', // closed polyline
+  ];
+
+  for (const p of pts) {
+    lines.push('0', 'VERTEX', '8', 'PROFIL', '10', p.x.toFixed(3), '20', p.y.toFixed(3), '30', '0.0');
+  }
+
+  lines.push('0', 'SEQEND', '0', 'ENDSEC', '0', 'EOF');
+
+  downloadFile(`${productName}_schita_profil.dxf`, lines.join('\n') + '\n', 'application/dxf');
+}
+
 // ─── Download helper ──────────────────────────────────────────────────────────
 
 function downloadFile(filename: string, content: string | Blob, type: string): void {
@@ -596,6 +615,11 @@ export default function ThreeViewer({ params }: Props) {
     exportToDAE(meshRef.current, productLabel(params), params.color);
   }, [params]);
 
+  const handleExportDXF = useCallback(() => {
+    if (!params) return;
+    exportToDXF(getProfileShape(params), productLabel(params));
+  }, [params]);
+
   return (
     <div className="flex flex-col h-full gap-3">
       <div
@@ -623,6 +647,12 @@ export default function ThreeViewer({ params }: Props) {
             className="flex-1 min-w-[120px] px-4 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium transition-colors"
           >
             Export STL
+          </button>
+          <button
+            onClick={handleExportDXF}
+            className="flex-1 min-w-[120px] px-4 py-2.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-sm font-medium transition-colors"
+          >
+            Export schiță CAD (DXF)
           </button>
         </div>
       )}

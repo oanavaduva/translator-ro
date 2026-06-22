@@ -117,7 +117,7 @@ export default function Home() {
         </div>
         <div className="flex items-center gap-2 text-xs text-slate-500">
           <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block" />
-          Export: OBJ · DAE · STL
+          Export: OBJ · DAE · STL · DXF
         </div>
       </header>
 
