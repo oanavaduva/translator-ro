@@ -1,3 +1,11 @@
+# Wood Class CAD — Imagine to CAD
+
+**Aplicație live:** https://effect-creative.vercel.app/
+
+Generează modele 3D și fișiere CAD pentru plinte, cornișe și pardoseli SPC din descrieri text. Exporturi disponibile: OBJ+MTL, DAE (SketchUp), STL, DXF, JPG preview.
+
+---
+
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
 ## Getting Started

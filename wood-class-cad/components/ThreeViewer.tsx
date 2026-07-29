@@ -746,6 +746,16 @@ export default function ThreeViewer({ params }: Props) {
     exportToDXF(getProfileShape(params), productLabel(params));
   }, [params]);
 
+  const handleExportJPG = useCallback(() => {
+    const renderer = rendererRef.current;
+    const scene = sceneRef.current;
+    const camera = cameraRef.current;
+    if (!renderer || !scene || !camera || !params) return;
+    renderer.render(scene, camera);
+    const dataUrl = renderer.domElement.toDataURL('image/jpeg', 0.95);
+    downloadFile(`${productLabel(params)}_preview.jpg`, dataUrlToBlob(dataUrl), 'image/jpeg');
+  }, [params]);
+
   return (
     <div className="flex flex-col h-full gap-3">
       <div
@@ -779,6 +789,12 @@ export default function ThreeViewer({ params }: Props) {
             className="flex-1 min-w-[120px] px-4 py-2.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-sm font-medium transition-colors"
           >
             Export schiță CAD (DXF)
+          </button>
+          <button
+            onClick={handleExportJPG}
+            className="flex-1 min-w-[120px] px-4 py-2.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-sm font-medium transition-colors"
+          >
+            Export JPG (preview 3D)
           </button>
         </div>
       )}
