@@ -91,6 +91,11 @@ export default function Home() {
   const [textureLoading, setTextureLoading] = useState(false);
   const [textureError, setTextureError] = useState('');
 
+  const [secondaryTextureName, setSecondaryTextureName] = useState('');
+  const [secondaryTextureDataUrl, setSecondaryTextureDataUrl] = useState<string | null>(null);
+  const [secondaryTextureLoading, setSecondaryTextureLoading] = useState(false);
+  const [secondaryTextureError, setSecondaryTextureError] = useState('');
+
   const handleExtract = useCallback(async (text?: string) => {
     const input = text ?? description;
     if (!input.trim()) return;
@@ -178,6 +183,27 @@ export default function Home() {
     setTextureError('');
   };
 
+  const handleSecondaryTextureUpload = useCallback(async (file: File) => {
+    setSecondaryTextureLoading(true);
+    setSecondaryTextureError('');
+    setSecondaryTextureName(file.name);
+    try {
+      const dataUrl = await normalizeTextureImage(file);
+      setSecondaryTextureDataUrl(dataUrl);
+    } catch (err) {
+      setSecondaryTextureDataUrl(null);
+      setSecondaryTextureError(err instanceof Error ? err.message : 'Nu s-a putut încărca textura');
+    } finally {
+      setSecondaryTextureLoading(false);
+    }
+  }, []);
+
+  const clearSecondaryTexture = () => {
+    setSecondaryTextureName('');
+    setSecondaryTextureDataUrl(null);
+    setSecondaryTextureError('');
+  };
+
   const updateParams = (patch: Partial<ProductParams>) => {
     setParams(prev => ({ ...(prev ?? DEFAULT_PARAMS), ...patch }));
   };
@@ -185,7 +211,12 @@ export default function Home() {
   const activeType = params?.productType ?? DEFAULT_PARAMS.productType;
 
   const viewerParams: ProductParams | null = params
-    ? { ...params, customProfileSvg: sketchSvg ?? undefined, textureDataUrl: textureDataUrl ?? undefined }
+    ? {
+        ...params,
+        customProfileSvg: sketchSvg ?? undefined,
+        textureDataUrl: textureDataUrl ?? undefined,
+        secondaryTextureDataUrl: secondaryTextureDataUrl ?? undefined,
+      }
     : null;
 
   return (
@@ -340,7 +371,7 @@ export default function Home() {
                 />
               </div>
 
-              {/* Secondary color — only for riflaj (rib tops) */}
+              {/* Secondary color + optional texture — only for riflaj (rib tops / folie decor) */}
               {activeType === 'riflaj' && (
                 <div>
                   <label className="block text-xs text-slate-500 mb-1">Culoare 2 (vârfuri riflaje)</label>
@@ -350,6 +381,41 @@ export default function Home() {
                     onChange={e => updateParams({ secondaryColor: e.target.value })}
                     className="w-full h-[38px] bg-white/5 border border-white/10 rounded-lg cursor-pointer"
                   />
+                </div>
+              )}
+              {activeType === 'riflaj' && (
+                <div className="col-span-2">
+                  <label className="block text-xs text-slate-500 mb-1">
+                    Textură folie decor (opțional — înlocuiește Culoare 2)
+                  </label>
+                  <input
+                    type="file"
+                    accept={TEXTURE_ACCEPT}
+                    onChange={e => {
+                      const file = e.target.files?.[0];
+                      if (file) handleSecondaryTextureUpload(file);
+                      e.target.value = '';
+                    }}
+                    className="block w-full text-xs text-slate-400 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:bg-amber-500/20 file:text-amber-400 file:text-xs file:font-medium hover:file:bg-amber-500/30 file:cursor-pointer cursor-pointer"
+                  />
+                  {secondaryTextureLoading && (
+                    <p className="text-xs text-amber-400 mt-1.5 animate-pulse">Se procesează folie...</p>
+                  )}
+                  {secondaryTextureError && (
+                    <p className="text-xs text-red-400 mt-1.5">{secondaryTextureError}</p>
+                  )}
+                  {secondaryTextureDataUrl && !secondaryTextureLoading && (
+                    <div className="flex items-center justify-between mt-1.5 gap-2">
+                      <span className="text-xs text-amber-400 flex items-center gap-2 truncate">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={secondaryTextureDataUrl} alt="" className="w-5 h-5 rounded object-cover border border-white/20 flex-shrink-0" />
+                        <span className="truncate">✓ {secondaryTextureName}</span>
+                      </span>
+                      <button onClick={clearSecondaryTexture} className="text-xs text-slate-500 hover:text-slate-300 underline flex-shrink-0">
+                        Elimină
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
 

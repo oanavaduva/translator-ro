@@ -11,7 +11,8 @@ export interface ProductParams {
   profileStyle: ProfileStyle;
   finish: string;
   color: string;       // hex color
-  secondaryColor?: string; // hex color for riflaj rib tops
+  secondaryColor?: string;         // hex color for riflaj rib tops
+  secondaryTextureDataUrl?: string; // user-uploaded texture for riflaj rib tops (folie decor), overrides secondaryColor when present
   riflajType?: RiflajType; // RM | RM-XL | RS | RX — required when productType === 'riflaj'
   customProfileSvg?: string; // raw SVG markup traced from an uploaded sketch (CDR/PDF/JPG), overrides the preset profileStyle shape when present
   textureDataUrl?: string; // user-uploaded texture photo, normalized client-side to a capped-size JPEG data URL; when present, replaces the solid `color` fill on the 3D model and in exports

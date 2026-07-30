@@ -784,24 +784,31 @@ export default function ThreeViewer({ params }: Props) {
     scene.add(mesh);
     meshRef.current = mesh;
 
-    // Riflaj secondary-color rib caps: thin boxes placed at each rib top surface.
+    // Riflaj secondary-color (or secondary-texture) rib caps: thin boxes placed at each rib top.
     // Added as children of the main mesh so they follow the centering translation automatically.
-    if (params.productType === 'riflaj' && params.secondaryColor) {
+    // Texture (secondaryTextureDataUrl) overrides solid color when present — same pattern as main mesh.
+    if (params.productType === 'riflaj' && (params.secondaryColor || params.secondaryTextureDataUrl)) {
       const w = (params.width ?? 120) / 1000;
       const t = params.thickness / 1000;
       const l = params.length / 1000;
-      const capH = 0.001; // 1 mm thin overlay
+      const capH = 0.001;
       const capMat = new THREE.MeshStandardMaterial({
-        color: new THREE.Color(params.secondaryColor),
+        color: params.secondaryTextureDataUrl ? '#ffffff' : new THREE.Color(params.secondaryColor ?? '#8B6914'),
         roughness: 0.60,
         metalness: 0.05,
       });
       for (const cap of getRiflajRibCaps(w, params.riflajType ?? 'RM')) {
         const capGeo = new THREE.BoxGeometry(cap.topWidth, capH, l);
         const capMesh = new THREE.Mesh(capGeo, capMat);
-        // Coordinates in geometry local space (same as ExtrudeGeometry): x=cap.cx, y=t (rib top), z=l/2
         capMesh.position.set(cap.cx, t + capH / 2, l / 2);
         mesh.add(capMesh);
+      }
+      if (params.secondaryTextureDataUrl) {
+        loadProductTexture(params.secondaryTextureDataUrl, (tex) => {
+          if (cancelled) { tex.dispose(); return; }
+          capMat.map = tex;
+          capMat.needsUpdate = true;
+        });
       }
     }
 
@@ -976,12 +983,17 @@ export default function ThreeViewer({ params }: Props) {
               )}
               {params.textureDataUrl ? 'încărcată de utilizator' : params.color}
             </span>
-            {params.productType === 'riflaj' && params.secondaryColor && (
+            {params.productType === 'riflaj' && (params.secondaryColor || params.secondaryTextureDataUrl) && (
               <>
-                <span className="text-slate-400">Culoare 2:</span>
+                <span className="text-slate-400">{params.secondaryTextureDataUrl ? 'Folie decor:' : 'Culoare 2:'}</span>
                 <span className="flex items-center gap-2">
-                  <span className="inline-block w-4 h-4 rounded border border-white/20" style={{ background: params.secondaryColor }} />
-                  {params.secondaryColor}
+                  {params.secondaryTextureDataUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={params.secondaryTextureDataUrl} alt="" className="w-4 h-4 rounded object-cover border border-white/20" />
+                  ) : (
+                    <span className="inline-block w-4 h-4 rounded border border-white/20" style={{ background: params.secondaryColor }} />
+                  )}
+                  {params.secondaryTextureDataUrl ? 'textură aplicată' : params.secondaryColor}
                 </span>
               </>
             )}
