@@ -174,6 +174,11 @@ function getProfileShape(params: ProductParams): THREE.Shape {
   const h = height / 1000;
   const t = thickness / 1000;
 
+  if (productType === 'riflaj') {
+    const w = (width ?? 120) / 1000;
+    return buildRiflajShape(w, t, params.riflajType ?? 'RM');
+  }
+
   if (productType === 'pardoseala_spc') {
     const w = (width ?? 180) / 1000;
     const traced = customProfileSvg ? buildShapeFromSVG(customProfileSvg, w, t) : null;
@@ -204,6 +209,107 @@ function createProductGeometry(params: ProductParams): THREE.BufferGeometry {
   // Shape already spans width/thickness along X and height/thickness along Y (extrude depth =
   // length along Z), so the piece lies in its natural orientation — no rotation needed.
   return new THREE.ExtrudeGeometry(shape, { depth: l, bevelEnabled: false, steps: 1 });
+}
+
+// ─── Riflaj Profile Builders ──────────────────────────────────────────────────
+
+interface RibCapInfo { cx: number; topWidth: number; }
+
+function getRiflajParams(type: string, w: number): { n: number; ribFrac: number; ribHFrac: number; notchFrac: number } {
+  switch (type) {
+    case 'RM-XL': return { n: Math.max(2, Math.round(w / 0.025)), ribFrac: 0.58, ribHFrac: 0.62, notchFrac: 0.28 };
+    case 'RS':    return { n: Math.max(2, Math.round(w / 0.022)), ribFrac: 0.62, ribHFrac: 0.65, notchFrac: 0.18 };
+    case 'RX':    return { n: Math.max(2, Math.round(w / 0.030)), ribFrac: 0.60, ribHFrac: 0.60, notchFrac: 0.22 };
+    default:      return { n: Math.max(3, Math.round(w / 0.018)), ribFrac: 0.56, ribHFrac: 0.62, notchFrac: 0.28 };
+  }
+}
+
+// Builds the riflaj cross-section (viewed from end, X=width, Y=thickness) traced CCW.
+// The rib pattern repeats across the width; channels have small semicircular notches.
+function buildRiflajShape(w: number, t: number, riflajType: string): THREE.Shape {
+  const shape = new THREE.Shape();
+  const { n, ribFrac, ribHFrac, notchFrac } = getRiflajParams(riflajType, w);
+
+  const pitch   = w / n;
+  const ribW    = pitch * ribFrac;
+  const chanW   = pitch - ribW;
+  const halfChan = chanW / 2;
+  const ribH    = t * ribHFrac;
+  const chanBase = t - ribH;
+  const notchR  = Math.min(chanW * notchFrac, chanW * 0.38);
+
+  // CCW outline: bottom (l→r), right side up, top profile (r→l), left side down
+  shape.moveTo(0, 0);
+  shape.lineTo(w, 0);
+  shape.lineTo(w, chanBase);
+
+  for (let i = n - 1; i >= 0; i--) {
+    const ribLeft  = halfChan + i * pitch;
+    const ribRight = ribLeft + ribW;
+
+    // Navigate from current x to ribRight at chanBase (channel or half-channel)
+    if (i === n - 1) {
+      shape.lineTo(ribRight, chanBase);  // right half-channel
+    } else {
+      // Full channel with notch dipping below chanBase
+      const chanCX = ribRight + chanW / 2;
+      if (notchR > 0.0005 && notchR < chanW * 0.44) {
+        shape.lineTo(chanCX + notchR, chanBase);
+        shape.absarc(chanCX, chanBase, notchR, 0, Math.PI, false); // CW arc dips down
+        shape.lineTo(ribRight, chanBase);
+      } else {
+        shape.lineTo(ribRight, chanBase);
+      }
+    }
+
+    // Rib from (ribRight, chanBase) up and across to (ribLeft, chanBase)
+    if (riflajType === 'RS') {
+      // Trapezoidal: sloped sides, narrower top
+      const slope = ribW * 0.18;
+      shape.lineTo(ribRight - slope, t);
+      shape.lineTo(ribLeft  + slope, t);
+      shape.lineTo(ribLeft, chanBase);
+    } else if (riflajType === 'RX') {
+      // Stepped: two-level staircase rib
+      const sw  = ribW * 0.22;
+      const midH = chanBase + ribH * 0.45;
+      shape.lineTo(ribRight, midH);
+      shape.lineTo(ribRight - sw, midH);
+      shape.lineTo(ribRight - sw, t);
+      shape.lineTo(ribLeft  + sw, t);
+      shape.lineTo(ribLeft  + sw, midH);
+      shape.lineTo(ribLeft,       midH);
+      shape.lineTo(ribLeft,       chanBase);
+    } else {
+      // RM / RM-XL: rectangular rib
+      shape.lineTo(ribRight, t);
+      shape.lineTo(ribLeft,  t);
+      shape.lineTo(ribLeft,  chanBase);
+    }
+    // After tracing rib we're at (ribLeft, chanBase) — next iter picks up from here
+  }
+
+  shape.lineTo(0, chanBase);  // left half-channel
+  shape.lineTo(0, 0);
+  shape.closePath();
+  return shape;
+}
+
+// Returns the center-x and top-face width of each rib, used to build secondary-color cap meshes.
+function getRiflajRibCaps(w: number, riflajType: string): RibCapInfo[] {
+  const { n, ribFrac } = getRiflajParams(riflajType, w);
+  const pitch  = w / n;
+  const ribW   = pitch * ribFrac;
+  const halfChan = (pitch - ribW) / 2;
+  const caps: RibCapInfo[] = [];
+  for (let i = 0; i < n; i++) {
+    const ribLeft = halfChan + i * pitch;
+    let topWidth = ribW;
+    if (riflajType === 'RS') topWidth = ribW * (1 - 2 * 0.18);
+    else if (riflajType === 'RX') topWidth = ribW * (1 - 2 * 0.22);
+    caps.push({ cx: ribLeft + ribW / 2, topWidth: Math.max(topWidth, 0.001) });
+  }
+  return caps;
 }
 
 // ExtrudeGeometry's default WorldUVGenerator maps UVs straight from local geometry coordinates,
@@ -538,6 +644,9 @@ function dataUrlToBlob(dataUrl: string): Blob {
 }
 
 function productLabel(params: ProductParams): string {
+  if (params.productType === 'riflaj') {
+    return `Riflaj_${params.riflajType ?? 'RM'}_${params.width ?? 120}x${params.thickness}x${params.length}mm`;
+  }
   const typeMap: Record<string, string> = {
     plinta: 'Plinta',
     cornisa: 'Cornisa',
@@ -642,14 +751,17 @@ export default function ThreeViewer({ params }: Props) {
     const camera = cameraRef.current;
     if (!scene || !camera) return;
 
-    // Remove old mesh (material + texture too — textures from uploaded photos are sizeable
-    // GPU resources and would otherwise leak on every params change)
+    // Remove old mesh and any rib-cap children — traverse disposes all geometries/materials
+    // (including secondary-color rib caps) and avoids GPU leaks from textures and shared mats.
     if (meshRef.current) {
       scene.remove(meshRef.current);
-      meshRef.current.geometry.dispose();
-      const oldMat = meshRef.current.material as THREE.MeshStandardMaterial;
-      oldMat.map?.dispose();
-      oldMat.dispose();
+      const disposed = new Set<THREE.Material>();
+      meshRef.current.traverse((obj) => {
+        if (!(obj instanceof THREE.Mesh)) return;
+        obj.geometry.dispose();
+        const m = obj.material as THREE.MeshStandardMaterial;
+        if (!disposed.has(m)) { m.map?.dispose(); m.dispose(); disposed.add(m); }
+      });
       meshRef.current = null;
     }
 
@@ -671,6 +783,27 @@ export default function ThreeViewer({ params }: Props) {
     mesh.receiveShadow = true;
     scene.add(mesh);
     meshRef.current = mesh;
+
+    // Riflaj secondary-color rib caps: thin boxes placed at each rib top surface.
+    // Added as children of the main mesh so they follow the centering translation automatically.
+    if (params.productType === 'riflaj' && params.secondaryColor) {
+      const w = (params.width ?? 120) / 1000;
+      const t = params.thickness / 1000;
+      const l = params.length / 1000;
+      const capH = 0.001; // 1 mm thin overlay
+      const capMat = new THREE.MeshStandardMaterial({
+        color: new THREE.Color(params.secondaryColor),
+        roughness: 0.60,
+        metalness: 0.05,
+      });
+      for (const cap of getRiflajRibCaps(w, params.riflajType ?? 'RM')) {
+        const capGeo = new THREE.BoxGeometry(cap.topWidth, capH, l);
+        const capMesh = new THREE.Mesh(capGeo, capMat);
+        // Coordinates in geometry local space (same as ExtrudeGeometry): x=cap.cx, y=t (rib top), z=l/2
+        capMesh.position.set(cap.cx, t + capH / 2, l / 2);
+        mesh.add(capMesh);
+      }
+    }
 
     let cancelled = false;
     if (params.textureDataUrl) {
@@ -804,12 +937,20 @@ export default function ThreeViewer({ params }: Props) {
           <div className="font-semibold text-slate-200 mb-2">Parametri extrași</div>
           <div className="grid grid-cols-2 gap-x-4 gap-y-1">
             <span className="text-slate-400">Tip:</span>
-            <span>{params.productType.replace('_', ' ').toUpperCase()}</span>
-            <span className="text-slate-400">Înălțime:</span>
-            <span>{params.height} mm</span>
+            <span>
+              {params.productType === 'riflaj'
+                ? `RIFLAJ ${params.riflajType ?? 'RM'}`
+                : params.productType.replace('_', ' ').toUpperCase()}
+            </span>
+            {params.productType !== 'pardoseala_spc' && params.productType !== 'riflaj' && (
+              <>
+                <span className="text-slate-400">Înălțime:</span>
+                <span>{params.height} mm</span>
+              </>
+            )}
             <span className="text-slate-400">Grosime:</span>
             <span>{params.thickness} mm</span>
-            {params.width && (
+            {(params.productType === 'pardoseala_spc' || params.productType === 'riflaj') && params.width && (
               <>
                 <span className="text-slate-400">Lățime:</span>
                 <span>{params.width} mm</span>
@@ -817,23 +958,33 @@ export default function ThreeViewer({ params }: Props) {
             )}
             <span className="text-slate-400">Lungime:</span>
             <span>{params.length} mm</span>
-            <span className="text-slate-400">Profil:</span>
-            <span>{params.customProfileSvg ? 'din schiță încărcată' : params.profileStyle}</span>
+            {params.productType !== 'riflaj' && (
+              <>
+                <span className="text-slate-400">Profil:</span>
+                <span>{params.customProfileSvg ? 'din schiță încărcată' : params.profileStyle}</span>
+              </>
+            )}
             <span className="text-slate-400">Finisaj:</span>
             <span>{params.finish}</span>
-            <span className="text-slate-400">{params.textureDataUrl ? 'Textură:' : 'Culoare:'}</span>
+            <span className="text-slate-400">{params.textureDataUrl ? 'Textură:' : 'Culoare 1:'}</span>
             <span className="flex items-center gap-2">
               {params.textureDataUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img src={params.textureDataUrl} alt="" className="w-4 h-4 rounded object-cover border border-white/20" />
               ) : (
-                <span
-                  className="inline-block w-4 h-4 rounded border border-white/20"
-                  style={{ background: params.color }}
-                />
+                <span className="inline-block w-4 h-4 rounded border border-white/20" style={{ background: params.color }} />
               )}
               {params.textureDataUrl ? 'încărcată de utilizator' : params.color}
             </span>
+            {params.productType === 'riflaj' && params.secondaryColor && (
+              <>
+                <span className="text-slate-400">Culoare 2:</span>
+                <span className="flex items-center gap-2">
+                  <span className="inline-block w-4 h-4 rounded border border-white/20" style={{ background: params.secondaryColor }} />
+                  {params.secondaryColor}
+                </span>
+              </>
+            )}
           </div>
         </div>
       )}

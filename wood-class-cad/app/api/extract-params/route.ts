@@ -18,17 +18,19 @@ Returnează exact acest JSON (înlocuiește valorile cu cele extrase):
   "length": 2400,
   "profileStyle": "classical",
   "finish": "stejar natural",
-  "color": "#C4A35A"
+  "color": "#C4A35A",
+  "riflajType": null
 }
 
 Reguli stricte:
-- productType: "plinta" dacă e plintă/skirting/bordură podea | "cornisa" dacă e cornișă/tavan | "pardoseala_spc" dacă e pardoseală/SPC/LVT/vinil/PVC
+- productType: "plinta" dacă e plintă/skirting/bordură podea | "cornisa" dacă e cornișă/tavan | "pardoseala_spc" dacă e pardoseală/SPC/LVT/vinil/PVC | "riflaj" dacă e riflaj/panouri riflate/ribs/fluted panel
 - Dacă nu se poate determina → "plinta"
 - Toate dimensiunile în milimetri (mm)
-- Defaulturi: plintă height=70 thickness=12 length=2400 | cornișă height=100 thickness=80 length=2400 | pardoseală width=180 thickness=8 length=1220
+- Defaulturi: plintă height=70 thickness=12 length=2400 | cornișă height=100 thickness=80 length=2400 | pardoseală width=180 thickness=8 length=1220 | riflaj width=120 thickness=18 length=2400 height=18
 - profileStyle: "straight" | "rounded" | "stepped" | "classical" | "modern"
 - color hex: stejar=#C4A35A | stejar gri=#8B8B7A | stejar închis=#7A5C30 | wenge=#3D2B1F | alb=#F5F5F0 | gri=#9E9EA0 | nuc=#5C4033 | bambus=#D4C07A | antracit=#3A3A3C
-- width este obligatoriu DOAR pentru pardoseala_spc`;
+- width este obligatoriu pentru pardoseala_spc și riflaj
+- riflajType: "RM" | "RM-XL" | "RS" | "RX" — DOAR dacă productType="riflaj"; altfel null. RM=standard, RM-XL=mare, RS=trapezoidal, RX=trepte`;
 
 export async function POST(request: NextRequest) {
   try {
@@ -64,6 +66,13 @@ export async function POST(request: NextRequest) {
     if (!params.color) params.color = '#C4A35A';
     if (params.productType === 'pardoseala_spc' && (!params.width || params.width <= 0)) {
       params.width = 180;
+    }
+    if (params.productType === 'riflaj') {
+      if (!params.width || params.width <= 0) params.width = 120;
+      if (!params.thickness || params.thickness <= 0) params.thickness = 18;
+      if (!params.height || params.height <= 0) params.height = 18;
+      const validRiflaj = ['RM', 'RM-XL', 'RS', 'RX'];
+      if (!validRiflaj.includes(params.riflajType)) params.riflajType = 'RM';
     }
 
     return NextResponse.json({ success: true, params });

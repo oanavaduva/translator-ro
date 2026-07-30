@@ -1,15 +1,18 @@
-export type ProductType = 'plinta' | 'cornisa' | 'pardoseala_spc' | 'unknown';
+export type ProductType = 'plinta' | 'cornisa' | 'pardoseala_spc' | 'riflaj' | 'unknown';
 export type ProfileStyle = 'straight' | 'rounded' | 'stepped' | 'classical' | 'modern';
+export type RiflajType = 'RM' | 'RM-XL' | 'RS' | 'RX';
 
 export interface ProductParams {
   productType: ProductType;
   height: number;      // mm
   thickness: number;   // mm
-  width?: number;      // mm - only for pardoseala_spc
+  width?: number;      // mm - for pardoseala_spc and riflaj
   length: number;      // mm
   profileStyle: ProfileStyle;
   finish: string;
   color: string;       // hex color
+  secondaryColor?: string; // hex color for riflaj rib tops
+  riflajType?: RiflajType; // RM | RM-XL | RS | RX — required when productType === 'riflaj'
   customProfileSvg?: string; // raw SVG markup traced from an uploaded sketch (CDR/PDF/JPG), overrides the preset profileStyle shape when present
   textureDataUrl?: string; // user-uploaded texture photo, normalized client-side to a capped-size JPEG data URL; when present, replaces the solid `color` fill on the 3D model and in exports
 }

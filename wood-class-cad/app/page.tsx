@@ -2,7 +2,7 @@
 
 import { useState, useCallback } from 'react';
 import dynamic from 'next/dynamic';
-import type { ProductParams, ProductType, ProfileStyle } from '@/lib/types';
+import type { ProductParams, ProductType, ProfileStyle, RiflajType } from '@/lib/types';
 
 const ThreeViewer = dynamic(() => import('@/components/ThreeViewer'), {
   ssr: false,
@@ -17,8 +17,8 @@ const EXAMPLES = [
   'Plintă 7cm înălțime, 1.2cm grosime, 2.4m lungime, profil clasic, finisaj stejar natural',
   'Cornișă 10cm x 8cm, 3m, profil modern, culoare albă',
   'Pardoseală SPC 8mm grosime, 18cm lățime, stejar gri antichizat, 1.22m lungime',
+  'Riflaj RM 12cm lățime, 18mm grosime, 2.4m lungime, stejar natur',
   'Plintă 5cm, profil drept, wenge, 2m lungime',
-  'Cornișă clasică 12cm x 10cm, nuc, 2.5m',
 ];
 
 const SKETCH_ACCEPT = '.jpg,.jpeg,.png,.pdf,.cdr';
@@ -71,6 +71,7 @@ const DEFAULT_PARAMS: ProductParams = {
 function defaultsForType(type: ProductType): Partial<ProductParams> {
   if (type === 'cornisa') return { height: 100, thickness: 80, length: 2400 };
   if (type === 'pardoseala_spc') return { width: 180, thickness: 8, length: 1220 };
+  if (type === 'riflaj') return { width: 120, thickness: 18, length: 2400, height: 18, riflajType: 'RM' };
   return { height: 70, thickness: 12, length: 2400 };
 }
 
@@ -263,15 +264,34 @@ export default function Home() {
                   <option value="plinta">Plintă</option>
                   <option value="cornisa">Cornișă</option>
                   <option value="pardoseala_spc">Pardoseală SPC</option>
+                  <option value="riflaj">Riflaj</option>
                 </select>
               </div>
 
-              {activeType === 'pardoseala_spc' ? (
+              {/* Riflaj subtype selector */}
+              {activeType === 'riflaj' && (
+                <div className="col-span-2">
+                  <label className="block text-xs text-slate-500 mb-1">Tip riflaj</label>
+                  <select
+                    value={params?.riflajType ?? 'RM'}
+                    onChange={e => updateParams({ riflajType: e.target.value as RiflajType })}
+                    className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500/50"
+                  >
+                    <option value="RM">RM — riflaj dreptunghiular standard</option>
+                    <option value="RM-XL">RM-XL — riflaj dreptunghiular mare</option>
+                    <option value="RS">RS — riflaj trapezoidal</option>
+                    <option value="RX">RX — riflaj în trepte</option>
+                  </select>
+                </div>
+              )}
+
+              {/* Width: pardoseala_spc and riflaj; Height: plinta/cornisa */}
+              {(activeType === 'pardoseala_spc' || activeType === 'riflaj') ? (
                 <div>
                   <label className="block text-xs text-slate-500 mb-1">Lățime (mm)</label>
                   <input
                     type="number"
-                    value={params?.width ?? 180}
+                    value={params?.width ?? (activeType === 'riflaj' ? 120 : 180)}
                     onChange={e => updateParams({ width: Number(e.target.value) })}
                     className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500/50"
                   />
@@ -309,7 +329,9 @@ export default function Home() {
               </div>
 
               <div>
-                <label className="block text-xs text-slate-500 mb-1">Culoare</label>
+                <label className="block text-xs text-slate-500 mb-1">
+                  {activeType === 'riflaj' ? 'Culoare 1 (bază)' : 'Culoare'}
+                </label>
                 <input
                   type="color"
                   value={params?.color ?? DEFAULT_PARAMS.color}
@@ -318,7 +340,20 @@ export default function Home() {
                 />
               </div>
 
-              {activeType !== 'pardoseala_spc' && (
+              {/* Secondary color — only for riflaj (rib tops) */}
+              {activeType === 'riflaj' && (
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Culoare 2 (vârfuri riflaje)</label>
+                  <input
+                    type="color"
+                    value={params?.secondaryColor ?? '#8B6914'}
+                    onChange={e => updateParams({ secondaryColor: e.target.value })}
+                    className="w-full h-[38px] bg-white/5 border border-white/10 rounded-lg cursor-pointer"
+                  />
+                </div>
+              )}
+
+              {activeType !== 'pardoseala_spc' && activeType !== 'riflaj' && (
                 <div className="col-span-2">
                   <label className="block text-xs text-slate-500 mb-1">Profil (dacă nu ai încărcat o imagine)</label>
                   <select
