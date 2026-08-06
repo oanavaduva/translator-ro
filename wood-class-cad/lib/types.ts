@@ -1,7 +1,7 @@
 export type ProductType = 'plinta' | 'cornisa' | 'pardoseala_spc' | 'riflaj' | 'unknown';
 export type ProfileStyle = 'straight' | 'rounded' | 'stepped' | 'classical' | 'modern';
 export type RiflajType = 'RM' | 'RM-XL' | 'RS' | 'RX';
-export type MiterType = 'none' | 'interior' | 'exterior';
+export type MiterType = 'none' | 'interior' | 'interior_left' | 'exterior' | 'exterior_left';
 
 export interface ProductParams {
   productType: ProductType;

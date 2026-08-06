@@ -363,27 +363,39 @@ export default function Home() {
               </div>
 
               <div className="col-span-2">
-                <label className="block text-xs text-slate-500 mb-1">Tăiere capăt (45°)</label>
-                <div className="flex gap-1.5">
-                  {([
-                    { value: 'none',     label: '| Drept',       title: 'Capăt drept (fără tăiere)' },
-                    { value: 'interior', label: '◤ Interior',    title: 'Tăiere 45° — colț interior (concav)' },
-                    { value: 'exterior', label: '◥ Exterior',    title: 'Tăiere 45° — colț exterior (convex)' },
-                  ] as { value: MiterType; label: string; title: string }[]).map(opt => (
-                    <button
-                      key={opt.value}
-                      title={opt.title}
-                      onClick={() => setMiterType(opt.value)}
-                      className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-medium border transition-colors ${
-                        miterType === opt.value
-                          ? 'bg-amber-500/30 border-amber-500/60 text-amber-300'
-                          : 'bg-white/5 border-white/10 text-slate-400 hover:bg-white/10 hover:text-slate-200'
-                      }`}
-                    >
-                      {opt.label}
-                    </button>
-                  ))}
+                <label className="block text-xs text-slate-500 mb-1">Tăiere 45° (colț montaj)</label>
+                <div className="grid grid-cols-3 gap-1.5 mb-1.5">
+                  <button
+                    title="Fără tăiere"
+                    onClick={() => setMiterType('none')}
+                    className={`py-1.5 px-2 rounded-lg text-xs font-medium border transition-colors ${miterType === 'none' ? 'bg-amber-500/30 border-amber-500/60 text-amber-300' : 'bg-white/5 border-white/10 text-slate-400 hover:bg-white/10 hover:text-slate-200'}`}
+                  >| Drept</button>
+                  <button
+                    title="Tăiere 45° interior — capăt dreapta"
+                    onClick={() => setMiterType('interior')}
+                    className={`py-1.5 px-2 rounded-lg text-xs font-medium border transition-colors ${miterType === 'interior' ? 'bg-amber-500/30 border-amber-500/60 text-amber-300' : 'bg-white/5 border-white/10 text-slate-400 hover:bg-white/10 hover:text-slate-200'}`}
+                  >◤ Interior</button>
+                  <button
+                    title="Tăiere 45° exterior — capăt dreapta"
+                    onClick={() => setMiterType('exterior')}
+                    className={`py-1.5 px-2 rounded-lg text-xs font-medium border transition-colors ${miterType === 'exterior' ? 'bg-amber-500/30 border-amber-500/60 text-amber-500/60 text-amber-300' : 'bg-white/5 border-white/10 text-slate-400 hover:bg-white/10 hover:text-slate-200'}`}
+                  >◥ Exterior</button>
                 </div>
+                <div className="grid grid-cols-2 gap-1.5">
+                  <button
+                    title="Tăiere 45° interior — capăt stânga (perechea pentru Interior)"
+                    onClick={() => setMiterType('interior_left')}
+                    className={`py-1.5 px-2 rounded-lg text-xs font-medium border transition-colors ${miterType === 'interior_left' ? 'bg-amber-500/30 border-amber-500/60 text-amber-300' : 'bg-white/5 border-white/10 text-slate-400 hover:bg-white/10 hover:text-slate-200'}`}
+                  >◤ Interior Invers</button>
+                  <button
+                    title="Tăiere 45° exterior — capăt stânga (perechea pentru Exterior)"
+                    onClick={() => setMiterType('exterior_left')}
+                    className={`py-1.5 px-2 rounded-lg text-xs font-medium border transition-colors ${miterType === 'exterior_left' ? 'bg-amber-500/30 border-amber-500/60 text-amber-300' : 'bg-white/5 border-white/10 text-slate-400 hover:bg-white/10 hover:text-slate-200'}`}
+                  >◥ Exterior Invers</button>
+                </div>
+                {(miterType === 'interior_left' || miterType === 'exterior_left') && (
+                  <p className="text-xs text-slate-500 mt-1">Capăt stânga — perechea oglidă pentru colț</p>
+                )}
               </div>
 
               <div>

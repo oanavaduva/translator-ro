@@ -647,7 +647,8 @@ function dataUrlToBlob(dataUrl: string): Blob {
 }
 
 function productLabel(params: ProductParams): string {
-  const miterSuffix = params.miterType === 'interior' ? '_45int' : params.miterType === 'exterior' ? '_45ext' : '';
+  const miterSuffixes: Record<string, string> = { interior: '_45int', interior_left: '_45int_inv', exterior: '_45ext', exterior_left: '_45ext_inv' };
+  const miterSuffix = params.miterType ? (miterSuffixes[params.miterType] ?? '') : '';
   if (params.productType === 'riflaj') {
     return `Riflaj_${params.riflajType ?? 'RM'}_${params.width ?? 120}x${params.thickness}x${params.length}mm${miterSuffix}`;
   }
@@ -673,10 +674,17 @@ function getMiterPlane(params: ProductParams): THREE.Plane | null {
   const w = params.width != null ? params.width / 1000 : t;
   const xHalf = (params.productType === 'pardoseala_spc' || params.productType === 'riflaj') ? w / 2 : t / 2;
   const constant = (l / 2 - xHalf) / Math.SQRT2;
-  const normal = params.miterType === 'interior'
-    ? new THREE.Vector3(-1, 0, -1).normalize()
-    : new THREE.Vector3(1, 0, -1).normalize();
-  return new THREE.Plane(normal, constant);
+  // Right-end cuts (+Z face): interior keeps back longer, exterior keeps front longer.
+  // Left-end cuts (−Z face): mirror of the above — normal Z component flips to +1.
+  const normals: Record<string, [number, number, number]> = {
+    interior:       [-1, 0, -1],
+    exterior:       [ 1, 0, -1],
+    interior_left:  [ 1, 0,  1],
+    exterior_left:  [-1, 0,  1],
+  };
+  const n = normals[params.miterType];
+  if (!n) return null;
+  return new THREE.Plane(new THREE.Vector3(...n).normalize(), constant);
 }
 
 type Vec3Tuple = [number, number, number];
