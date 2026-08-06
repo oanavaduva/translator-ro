@@ -332,8 +332,9 @@ function loadProductTexture(dataUrl: string, onLoad: (tex: THREE.Texture) => voi
 
 // ─── OBJ Exporter ─────────────────────────────────────────────────────────────
 
-function exportToOBJ(mesh: THREE.Mesh, productName: string, color: string, textureDataUrl?: string): void {
-  const geo = mesh.geometry.clone();
+function exportToOBJ(mesh: THREE.Mesh, productName: string, color: string, textureDataUrl?: string, miterPlane?: THREE.Plane | null): void {
+  const base = mesh.geometry.clone();
+  const geo = miterPlane ? clipGeometryByPlane(base, miterPlane) : base;
   geo.computeVertexNormals();
 
   const positions = geo.attributes.position;
@@ -389,8 +390,9 @@ function exportToOBJ(mesh: THREE.Mesh, productName: string, color: string, textu
 
 // ─── STL Exporter ─────────────────────────────────────────────────────────────
 
-function exportToSTL(mesh: THREE.Mesh, productName: string): void {
-  const geo = mesh.geometry.clone();
+function exportToSTL(mesh: THREE.Mesh, productName: string, miterPlane?: THREE.Plane | null): void {
+  const base = mesh.geometry.clone();
+  const geo = miterPlane ? clipGeometryByPlane(base, miterPlane) : base;
   geo.computeVertexNormals();
 
   const positions = geo.attributes.position;
@@ -439,8 +441,9 @@ function exportToSTL(mesh: THREE.Mesh, productName: string): void {
 
 // ─── DAE (Collada) Exporter ───────────────────────────────────────────────────
 
-function exportToDAE(mesh: THREE.Mesh, productName: string, color: string, textureDataUrl?: string): void {
-  const geo = mesh.geometry.clone();
+function exportToDAE(mesh: THREE.Mesh, productName: string, color: string, textureDataUrl?: string, miterPlane?: THREE.Plane | null): void {
+  const base = mesh.geometry.clone();
+  const geo = miterPlane ? clipGeometryByPlane(base, miterPlane) : base;
   geo.computeVertexNormals();
 
   const positions = geo.attributes.position;
@@ -644,8 +647,9 @@ function dataUrlToBlob(dataUrl: string): Blob {
 }
 
 function productLabel(params: ProductParams): string {
+  const miterSuffix = params.miterType === 'interior' ? '_45int' : params.miterType === 'exterior' ? '_45ext' : '';
   if (params.productType === 'riflaj') {
-    return `Riflaj_${params.riflajType ?? 'RM'}_${params.width ?? 120}x${params.thickness}x${params.length}mm`;
+    return `Riflaj_${params.riflajType ?? 'RM'}_${params.width ?? 120}x${params.thickness}x${params.length}mm${miterSuffix}`;
   }
   const typeMap: Record<string, string> = {
     plinta: 'Plinta',
@@ -653,7 +657,97 @@ function productLabel(params: ProductParams): string {
     pardoseala_spc: 'Pardoseala_SPC',
     unknown: 'Produs',
   };
-  return `${typeMap[params.productType] ?? 'Produs'}_${params.height}x${params.thickness}x${params.length}mm`;
+  return `${typeMap[params.productType] ?? 'Produs'}_${params.height}x${params.thickness}x${params.length}mm${miterSuffix}`;
+}
+
+// ─── Miter Cut ────────────────────────────────────────────────────────────────
+
+// Returns a Three.js clipping plane (in world space) for a 45° miter at the right end (+Z).
+// After mesh centering, world coords: X ∈ [-xHalf, xHalf], Z ∈ [-l/2, l/2].
+// Interior: back face (X = -xHalf) stays at full length; front face (X = +xHalf) is shorter.
+// Exterior: front face (X = +xHalf) stays at full length; back face is shorter.
+function getMiterPlane(params: ProductParams): THREE.Plane | null {
+  if (!params.miterType || params.miterType === 'none') return null;
+  const l = params.length / 1000;
+  const t = params.thickness / 1000;
+  const w = params.width != null ? params.width / 1000 : t;
+  const xHalf = (params.productType === 'pardoseala_spc' || params.productType === 'riflaj') ? w / 2 : t / 2;
+  const constant = (l / 2 - xHalf) / Math.SQRT2;
+  const normal = params.miterType === 'interior'
+    ? new THREE.Vector3(-1, 0, -1).normalize()
+    : new THREE.Vector3(1, 0, -1).normalize();
+  return new THREE.Plane(normal, constant);
+}
+
+type Vec3Tuple = [number, number, number];
+function lerpV(a: Vec3Tuple, b: Vec3Tuple, t: number): Vec3Tuple {
+  return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+}
+
+// Clips a BufferGeometry against a Three.js Plane (world-space). Returns a new non-indexed geometry
+// with triangles that cross the plane split at the intersection edge. No cap face is added (the
+// cut face is open); downstream 3D apps can close it if needed.
+function clipGeometryByPlane(geo: THREE.BufferGeometry, plane: THREE.Plane): THREE.BufferGeometry {
+  const src = geo.index ? geo.toNonIndexed() : geo.clone();
+  const pos = src.attributes.position;
+  const nrm = src.attributes.normal;
+  const uv  = src.attributes.uv;
+
+  const outPos: number[] = [], outNrm: number[] = [], outUV: number[] = [];
+
+  const n = plane.normal;
+  const d0 = (v: Vec3Tuple) => n.x * v[0] + n.y * v[1] + n.z * v[2] + plane.constant;
+
+  for (let tri = 0; tri < pos.count / 3; tri++) {
+    const verts: Vec3Tuple[] = [], nrms: Vec3Tuple[] = [], uvs: [number, number][] = [];
+    for (let j = 0; j < 3; j++) {
+      const i = tri * 3 + j;
+      verts.push([pos.getX(i), pos.getY(i), pos.getZ(i)]);
+      nrms.push([nrm.getX(i), nrm.getY(i), nrm.getZ(i)]);
+      if (uv) uvs.push([uv.getX(i), uv.getY(i)]);
+    }
+    const ds = verts.map(d0);
+    const inside = ds.map(d => d >= 0);
+    const cnt = inside.filter(Boolean).length;
+    if (cnt === 3) {
+      for (let j = 0; j < 3; j++) { outPos.push(...verts[j]); outNrm.push(...nrms[j]); if (uv) outUV.push(...uvs[j]); }
+    } else if (cnt === 0) {
+      // fully clipped — skip
+    } else {
+      let idx = [0, 1, 2];
+      while (!inside[idx[0]]) idx = [idx[1], idx[2], idx[0]];
+      const [i0, i1, i2] = idx;
+      const v = [verts[i0], verts[i1], verts[i2]];
+      const nn = [nrms[i0], nrms[i1], nrms[i2]];
+      const du = uv ? [uvs[i0], uvs[i1], uvs[i2]] : [];
+      const dd = [ds[i0], ds[i1], ds[i2]];
+
+      if (cnt === 1) {
+        const t01 = dd[0] / (dd[0] - dd[1]), t02 = dd[0] / (dd[0] - dd[2]);
+        const p01 = lerpV(v[0], v[1], t01), p02 = lerpV(v[0], v[2], t02);
+        outPos.push(...v[0], ...p01, ...p02);
+        outNrm.push(...nn[0], ...lerpV(nn[0], nn[1], t01), ...lerpV(nn[0], nn[2], t02));
+        if (uv) { outUV.push(...du[0], du[0][0]+(du[1][0]-du[0][0])*t01, du[0][1]+(du[1][1]-du[0][1])*t01, du[0][0]+(du[2][0]-du[0][0])*t02, du[0][1]+(du[2][1]-du[0][1])*t02); }
+      } else {
+        const t02 = dd[0] / (dd[0] - dd[2]), t12 = dd[1] / (dd[1] - dd[2]);
+        const p02 = lerpV(v[0], v[2], t02), p12 = lerpV(v[1], v[2], t12);
+        const n02 = lerpV(nn[0], nn[2], t02), n12 = lerpV(nn[1], nn[2], t12);
+        outPos.push(...v[0], ...v[1], ...p02, ...v[1], ...p12, ...p02);
+        outNrm.push(...nn[0], ...nn[1], ...n02, ...nn[1], ...n12, ...n02);
+        if (uv) {
+          const uv02: [number, number] = [du[0][0]+(du[2][0]-du[0][0])*t02, du[0][1]+(du[2][1]-du[0][1])*t02];
+          const uv12: [number, number] = [du[1][0]+(du[2][0]-du[1][0])*t12, du[1][1]+(du[2][1]-du[1][1])*t12];
+          outUV.push(...du[0], ...du[1], ...uv02, ...du[1], ...uv12, ...uv02);
+        }
+      }
+    }
+  }
+
+  const result = new THREE.BufferGeometry();
+  result.setAttribute('position', new THREE.Float32BufferAttribute(outPos, 3));
+  result.setAttribute('normal', new THREE.Float32BufferAttribute(outNrm, 3));
+  if (uv) result.setAttribute('uv', new THREE.Float32BufferAttribute(outUV, 2));
+  return result;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -708,6 +802,7 @@ export default function ThreeViewer({ params }: Props) {
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.1;
+    renderer.localClippingEnabled = true;
     container.appendChild(renderer.domElement);
     rendererRef.current = renderer;
 
@@ -778,6 +873,9 @@ export default function ThreeViewer({ params }: Props) {
       metalness: 0.05,
     });
 
+    const miterPlane = getMiterPlane(params);
+    mat.clippingPlanes = miterPlane ? [miterPlane] : [];
+
     const mesh = new THREE.Mesh(geo, mat);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
@@ -796,6 +894,7 @@ export default function ThreeViewer({ params }: Props) {
         color: params.secondaryTextureDataUrl ? '#ffffff' : new THREE.Color(params.secondaryColor ?? '#8B6914'),
         roughness: 0.60,
         metalness: 0.05,
+        clippingPlanes: miterPlane ? [miterPlane] : [],
       });
       for (const cap of getRiflajRibCaps(w, params.riflajType ?? 'RM')) {
         const capGeo = new THREE.BoxGeometry(cap.topWidth, capH, l);
@@ -868,17 +967,17 @@ export default function ThreeViewer({ params }: Props) {
 
   const handleExportOBJ = useCallback(() => {
     if (!meshRef.current || !params) return;
-    exportToOBJ(meshRef.current, productLabel(params), params.color, params.textureDataUrl);
+    exportToOBJ(meshRef.current, productLabel(params), params.color, params.textureDataUrl, getMiterPlane(params));
   }, [params]);
 
   const handleExportSTL = useCallback(() => {
     if (!meshRef.current || !params) return;
-    exportToSTL(meshRef.current, productLabel(params));
+    exportToSTL(meshRef.current, productLabel(params), getMiterPlane(params));
   }, [params]);
 
   const handleExportDAE = useCallback(() => {
     if (!meshRef.current || !params) return;
-    exportToDAE(meshRef.current, productLabel(params), params.color, params.textureDataUrl);
+    exportToDAE(meshRef.current, productLabel(params), params.color, params.textureDataUrl, getMiterPlane(params));
   }, [params]);
 
   const handleExportDXF = useCallback(() => {

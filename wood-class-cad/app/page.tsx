@@ -2,7 +2,7 @@
 
 import { useState, useCallback } from 'react';
 import dynamic from 'next/dynamic';
-import type { ProductParams, ProductType, ProfileStyle, RiflajType } from '@/lib/types';
+import type { ProductParams, ProductType, ProfileStyle, RiflajType, MiterType } from '@/lib/types';
 
 const ThreeViewer = dynamic(() => import('@/components/ThreeViewer'), {
   ssr: false,
@@ -95,6 +95,8 @@ export default function Home() {
   const [secondaryTextureDataUrl, setSecondaryTextureDataUrl] = useState<string | null>(null);
   const [secondaryTextureLoading, setSecondaryTextureLoading] = useState(false);
   const [secondaryTextureError, setSecondaryTextureError] = useState('');
+
+  const [miterType, setMiterType] = useState<MiterType>('none');
 
   const handleExtract = useCallback(async (text?: string) => {
     const input = text ?? description;
@@ -216,6 +218,7 @@ export default function Home() {
         customProfileSvg: sketchSvg ?? undefined,
         textureDataUrl: textureDataUrl ?? undefined,
         secondaryTextureDataUrl: secondaryTextureDataUrl ?? undefined,
+        miterType,
       }
     : null;
 
@@ -357,6 +360,30 @@ export default function Home() {
                   onChange={e => updateParams({ length: Number(e.target.value) })}
                   className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500/50"
                 />
+              </div>
+
+              <div className="col-span-2">
+                <label className="block text-xs text-slate-500 mb-1">Tăiere capăt (45°)</label>
+                <div className="flex gap-1.5">
+                  {([
+                    { value: 'none',     label: '| Drept',       title: 'Capăt drept (fără tăiere)' },
+                    { value: 'interior', label: '◤ Interior',    title: 'Tăiere 45° — colț interior (concav)' },
+                    { value: 'exterior', label: '◥ Exterior',    title: 'Tăiere 45° — colț exterior (convex)' },
+                  ] as { value: MiterType; label: string; title: string }[]).map(opt => (
+                    <button
+                      key={opt.value}
+                      title={opt.title}
+                      onClick={() => setMiterType(opt.value)}
+                      className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-medium border transition-colors ${
+                        miterType === opt.value
+                          ? 'bg-amber-500/30 border-amber-500/60 text-amber-300'
+                          : 'bg-white/5 border-white/10 text-slate-400 hover:bg-white/10 hover:text-slate-200'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
               </div>
 
               <div>
