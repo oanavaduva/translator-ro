@@ -1,8 +1,7 @@
-import Anthropic from '@anthropic-ai/sdk';
 import { NextRequest, NextResponse } from 'next/server';
-import mammoth from 'mammoth';
 
-const client = new Anthropic();
+// Force Node.js runtime — required for pdf-parse and mammoth
+export const runtime = 'nodejs';
 
 const MAX_BYTES = 12 * 1024 * 1024; // 12 MB
 
@@ -23,31 +22,25 @@ export async function POST(request: NextRequest) {
     const buffer = Buffer.from(await file.arrayBuffer());
 
     if (ext === 'pdf') {
-      const base64 = buffer.toString('base64');
-      const message = await client.messages.create({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 4000,
-        messages: [{
-          role: 'user',
-          content: [
-            {
-              type: 'document',
-              source: { type: 'base64', media_type: 'application/pdf', data: base64 },
-            },
-            {
-              type: 'text',
-              text: 'Extrage tot textul din acest document PDF. Returnează DOAR textul extras, fără explicații, fără formatare markdown, exact cum apare în document.',
-            },
-          ],
-        }],
-      });
-      const text = message.content[0].type === 'text' ? message.content[0].text.trim() : '';
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const pdfMod = await import('pdf-parse') as any;
+      const pdfParse = pdfMod.default ?? pdfMod;
+      const data = await pdfParse(buffer);
+      const text = data.text.trim();
+      if (!text) {
+        return NextResponse.json({ success: false, error: 'PDF-ul nu conține text selectabil (poate fi scanat). Copiați textul manual.' }, { status: 422 });
+      }
       return NextResponse.json({ success: true, text });
     }
 
     if (ext === 'docx') {
+      const mammoth = await import('mammoth');
       const result = await mammoth.extractRawText({ buffer });
-      return NextResponse.json({ success: true, text: result.value.trim() });
+      const text = result.value.trim();
+      if (!text) {
+        return NextResponse.json({ success: false, error: 'Documentul DOCX pare gol.' }, { status: 422 });
+      }
+      return NextResponse.json({ success: true, text });
     }
 
     return NextResponse.json(
