@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-// Force Node.js runtime — required for pdf-parse and mammoth
 export const runtime = 'nodejs';
 
 const MAX_BYTES = 12 * 1024 * 1024; // 12 MB
@@ -22,15 +21,16 @@ export async function POST(request: NextRequest) {
     const buffer = Buffer.from(await file.arrayBuffer());
 
     if (ext === 'pdf') {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const pdfMod = await import('pdf-parse') as any;
-      const pdfParse = pdfMod.default ?? pdfMod;
-      const data = await pdfParse(buffer);
-      const text = data.text.trim();
-      if (!text) {
-        return NextResponse.json({ success: false, error: 'PDF-ul nu conține text selectabil (poate fi scanat). Copiați textul manual.' }, { status: 422 });
+      const { extractText } = await import('unpdf');
+      const { text } = await extractText(new Uint8Array(buffer), { mergePages: true });
+      const trimmed = text.trim();
+      if (!trimmed) {
+        return NextResponse.json(
+          { success: false, error: 'PDF-ul nu conține text selectabil (poate fi scanat). Copiați textul manual.' },
+          { status: 422 }
+        );
       }
-      return NextResponse.json({ success: true, text });
+      return NextResponse.json({ success: true, text: trimmed });
     }
 
     if (ext === 'docx') {

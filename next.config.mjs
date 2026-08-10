@@ -5,7 +5,7 @@ const nextConfig = {
   // pdfjs-dist dynamically resolves its worker module by file path at runtime, which breaks once
   // webpack relocates it into .next/server/vendor-chunks — keep it external too.
   experimental: {
-    serverComponentsExternalPackages: ['potrace', 'jimp', 'pdfjs-dist', 'pdf-parse', 'mammoth'],
+    serverComponentsExternalPackages: ['potrace', 'jimp', 'pdfjs-dist', 'mammoth'],
   },
 };
 
