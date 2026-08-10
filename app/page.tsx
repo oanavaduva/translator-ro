@@ -29,11 +29,36 @@ export default function TranslatorPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [copied, setCopied] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [importError, setImportError] = useState('');
 
   const toggleLang = (code: string) => {
     setSelectedLangs(prev =>
       prev.includes(code) ? prev.filter(l => l !== code) : [...prev, code]
     );
+  };
+
+  const handleFileImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setImporting(true);
+    setImportError('');
+    const formData = new FormData();
+    formData.append('file', file);
+    try {
+      const res = await fetch('/api/extract', { method: 'POST', body: formData });
+      const data = await res.json();
+      if (data.success) {
+        setText(data.text);
+      } else {
+        setImportError(data.error ?? 'Eroare la importul fișierului');
+      }
+    } catch {
+      setImportError('Eroare de conexiune la server');
+    } finally {
+      setImporting(false);
+    }
   };
 
   const handleTranslate = useCallback(async () => {
@@ -225,19 +250,55 @@ export default function TranslatorPage() {
           <div className="flex flex-col gap-2">
             <div className="flex items-center justify-between">
               <label className="text-sm font-semibold text-slate-200">Text în Română</label>
-              {text.trim() && (
-                <span className="text-xs text-slate-500">{wordCount} cuv. · {text.length} car.</span>
-              )}
+              <div className="flex items-center gap-3">
+                {text.trim() && (
+                  <span className="text-xs text-slate-500">{wordCount} cuv. · {text.length} car.</span>
+                )}
+                <label className={`cursor-pointer flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-lg border transition-colors ${
+                  importing
+                    ? 'bg-indigo-500/10 border-indigo-500/20 text-indigo-400/50 cursor-not-allowed'
+                    : 'bg-white/5 border-white/10 text-slate-400 hover:bg-indigo-500/10 hover:border-indigo-500/30 hover:text-indigo-300'
+                }`}>
+                  {importing ? (
+                    <>
+                      <svg className="animate-spin w-3.5 h-3.5" viewBox="0 0 24 24" fill="none">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.4 0 0 5.4 0 12h4z" />
+                      </svg>
+                      Se procesează...
+                    </>
+                  ) : (
+                    <>
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                      </svg>
+                      Import PDF / Word
+                    </>
+                  )}
+                  <input
+                    type="file"
+                    accept=".pdf,.docx"
+                    disabled={importing}
+                    className="hidden"
+                    onChange={handleFileImport}
+                  />
+                </label>
+              </div>
             </div>
             <textarea
               value={text}
               onChange={e => setText(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) handleTranslate(); }}
-              placeholder="Introduceți textul în română care trebuie tradus..."
+              placeholder="Introduceți textul în română care trebuie tradus sau importați un fișier PDF / DOCX..."
               rows={9}
               className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-slate-500 resize-none focus:outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/25 transition-all leading-relaxed"
             />
-            <p className="text-xs text-slate-600">Ctrl+Enter pentru a traduce rapid</p>
+            {importError && (
+              <div className="bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2 text-xs text-red-400">
+                {importError}
+              </div>
+            )}
+            <p className="text-xs text-slate-600">Ctrl+Enter pentru a traduce rapid · PDF și DOCX suportate</p>
           </div>
 
           {/* Translate button */}
