@@ -13,6 +13,13 @@ const LANG_LABELS: Record<string, string> = {
 
 export async function POST(request: NextRequest) {
   try {
+    if (!process.env.ANTHROPIC_API_KEY) {
+      return NextResponse.json(
+        { success: false, error: 'Cheia API Anthropic (ANTHROPIC_API_KEY) nu este configurată pe server.' },
+        { status: 500 }
+      );
+    }
+
     const { text, languages } = await request.json();
 
     if (!text?.trim()) {
@@ -66,6 +73,38 @@ ${langList}
     return NextResponse.json({ success: true, translations });
   } catch (error) {
     console.error('translate error:', error);
+
+    if (error instanceof Anthropic.AuthenticationError) {
+      return NextResponse.json(
+        { success: false, error: 'Cheia API Anthropic este invalidă sau a expirat.' },
+        { status: 500 }
+      );
+    }
+    if (error instanceof Anthropic.PermissionDeniedError) {
+      return NextResponse.json(
+        { success: false, error: 'Cheia API Anthropic nu are permisiunea de a folosi acest model.' },
+        { status: 500 }
+      );
+    }
+    if (error instanceof Anthropic.NotFoundError) {
+      return NextResponse.json(
+        { success: false, error: 'Modelul AI configurat nu a fost găsit (verificați ID-ul modelului).' },
+        { status: 500 }
+      );
+    }
+    if (error instanceof Anthropic.RateLimitError) {
+      return NextResponse.json(
+        { success: false, error: 'Limita de cereri către AI a fost depășită. Încercați din nou peste câteva momente.' },
+        { status: 429 }
+      );
+    }
+    if (error instanceof Error && error.message.includes('Could not resolve authentication method')) {
+      return NextResponse.json(
+        { success: false, error: 'Cheia API Anthropic (ANTHROPIC_API_KEY) nu este configurată pe server.' },
+        { status: 500 }
+      );
+    }
+
     return NextResponse.json({ success: false, error: 'Eroare server' }, { status: 500 });
   }
 }
