@@ -84,7 +84,7 @@ LISTE = [
                               "Comandă confirmată", "Nu răspunde", "Nu e interesat", "Revine el"]),
     ("livrare", "Mod livrare", ["Curier", "Personal", "Showroom", "Poștă"]),
     ("primita", "Primită de client?", ["Da", "Nu", "Neconfirmat"]),
-    ("aprobat", "Aprobat de", ["Oana"]),
+    ("aprobat", "Aprobat de", ["Oana", "Pepi"]),
 ]
 LCOL = {key: get_column_letter(i + 1) for i, (key, _, _) in enumerate(LISTE)}
 
@@ -672,7 +672,7 @@ TXT = [
     ("H", "CUM ADAUG O OFERTĂ / CERERE NOUĂ"),
     ("", "Foaia „Oferte & Proiecte” > primul rând cu „Data cererii” goală > Data cererii (azi), ID client (dropdown; dacă nu există, creați-l întâi în „Clienți”), Nume proiect, Adresă șantier, Oraș/Județ, Tip proiect, Etapă șantier, Brand, Familii produse, Status = 1, Responsabil."),
     ("", "Când oferta pleacă: Produse ofertate (coduri + cantități), Cantitate, UM, Valoare fără TVA, Preț special (Da/Nu), Discount mediu, Data trimiterii, Valabilă până la, Status = 3, Data estimată achiziție, Următorul pas + data."),
-    ("", "Prețurile se iau DOAR din listele de preț oficiale sau de la Oana. Orice preț special se trece și în foaia „Prețuri speciale”, cu „Aprobat de”."),
+    ("", "Prețurile se iau DOAR din listele de preț oficiale sau de la Oana ori Pepi. Orice preț special se trece și în foaia „Prețuri speciale”, cu „Aprobat de”."),
     ("", "Un proiect cu mai multe oferte (ex. pardoseală + plinte separat) = mai multe rânduri, câte unul pe ofertă, cu același Nume proiect."),
     ("", ""),
     ("H", "CUM ADAUG O MOSTRĂ"),
